@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Inventario Agroquímicos · Los Maitenes</title>
+<title>Carga inicial inventario · Los Maitenes</title>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, setDoc, getDoc, updateDoc, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCNp1RaGDdZfc63jZ4hxXUjUwr9xRZxMsw",
@@ -20,952 +20,182 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-const ADMIN_PIN = "1234"; // ← CAMBIAR
-
-const CATEGORIAS = ["Herbicida", "Fungicida", "Insecticida", "Foliar", "Coadyuvante", "Otros"];
-const UNIDADES = ["L", "kg", "g", "mL", "t"];
-
-const CATALOGO = [
-  { nombre: "Roundup", categoria: "Herbicida", ingredienteActivo: "Glifosato 48%", fabricante: "Bayer" },
-  { nombre: "Faena", categoria: "Herbicida", ingredienteActivo: "Glifosato 48%", fabricante: "Nufarm" },
-  { nombre: "Touchdown IQ", categoria: "Herbicida", ingredienteActivo: "Glifosato 62%", fabricante: "Syngenta" },
-  { nombre: "Hierbamina", categoria: "Herbicida", ingredienteActivo: "2,4-D 72%", fabricante: "Nufarm" },
-  { nombre: "Esteron 47E", categoria: "Herbicida", ingredienteActivo: "2,4-D éster 47%", fabricante: "Corteva" },
-  { nombre: "Gramoxone", categoria: "Herbicida", ingredienteActivo: "Paraquat 27.6%", fabricante: "Syngenta" },
-  { nombre: "Sencor 70 WG", categoria: "Herbicida", ingredienteActivo: "Metribuzin 70%", fabricante: "Bayer" },
-  { nombre: "Select", categoria: "Herbicida", ingredienteActivo: "Cletodim 24%", fabricante: "Arysta" },
-  { nombre: "Poast", categoria: "Herbicida", ingredienteActivo: "Setoxidim 18.4%", fabricante: "BASF" },
-  { nombre: "Dithane M-45", categoria: "Fungicida", ingredienteActivo: "Mancozeb 80%", fabricante: "Corteva" },
-  { nombre: "Amistar", categoria: "Fungicida", ingredienteActivo: "Azoxistrobina 25%", fabricante: "Syngenta" },
-  { nombre: "Score", categoria: "Fungicida", ingredienteActivo: "Difenoconazol 25%", fabricante: "Syngenta" },
-  { nombre: "Tilt", categoria: "Fungicida", ingredienteActivo: "Propiconazol 25%", fabricante: "Syngenta" },
-  { nombre: "Folicur", categoria: "Fungicida", ingredienteActivo: "Tebuconazol 25%", fabricante: "Bayer" },
-  { nombre: "Cabrio Top", categoria: "Fungicida", ingredienteActivo: "Piraclostrobina 5% + Metiram 55%", fabricante: "BASF" },
-  { nombre: "Miravis Ace", categoria: "Fungicida", ingredienteActivo: "Pydiflumetofen 20% + Propiconazol 15%", fabricante: "Syngenta" },
-  { nombre: "Switch", categoria: "Fungicida", ingredienteActivo: "Ciprodinil 37.5% + Fludioxonil 25%", fabricante: "Syngenta" },
-  { nombre: "Captan 80 WG", categoria: "Fungicida", ingredienteActivo: "Captan 80%", fabricante: "Arysta" },
-  { nombre: "Kocide 2000", categoria: "Fungicida", ingredienteActivo: "Hidróxido de cobre 53.8%", fabricante: "Corteva" },
-  { nombre: "Scala", categoria: "Fungicida", ingredienteActivo: "Pirimetanil 40%", fabricante: "Bayer" },
-  { nombre: "Lorsban 75 WG", categoria: "Insecticida", ingredienteActivo: "Clorpirifós 75%", fabricante: "Corteva" },
-  { nombre: "Karate Zeon", categoria: "Insecticida", ingredienteActivo: "Lambda cihalotrina 10%", fabricante: "Syngenta" },
-  { nombre: "Decis Forte", categoria: "Insecticida", ingredienteActivo: "Deltametrina 10%", fabricante: "Bayer" },
-  { nombre: "Confidor", categoria: "Insecticida", ingredienteActivo: "Imidacloprid 35%", fabricante: "Bayer" },
-  { nombre: "Actara", categoria: "Insecticida", ingredienteActivo: "Tiametoxam 25%", fabricante: "Syngenta" },
-  { nombre: "Movento", categoria: "Insecticida", ingredienteActivo: "Spirotetramat 15%", fabricante: "Bayer" },
-  { nombre: "Vertimec", categoria: "Insecticida", ingredienteActivo: "Abamectina 1.8%", fabricante: "Syngenta" },
-  { nombre: "Exalt", categoria: "Insecticida", ingredienteActivo: "Spinetoram 12%", fabricante: "Corteva" },
-  { nombre: "Bayfolan", categoria: "Foliar", ingredienteActivo: "N-P-K + microelementos", fabricante: "Bayer" },
-  { nombre: "Fetrilon Combi", categoria: "Foliar", ingredienteActivo: "Fe, Mn, Zn, Cu, B, Mo quelatos", fabricante: "COMPO Expert" },
-  { nombre: "Nutribor", categoria: "Foliar", ingredienteActivo: "Boro 15%", fabricante: "Tradecorp" },
-  { nombre: "Stopit", categoria: "Foliar", ingredienteActivo: "Calcio 15%", fabricante: "Tradecorp" },
-  { nombre: "Silwet L-77", categoria: "Coadyuvante", ingredienteActivo: "Poliéter siliconado 80%", fabricante: "Momentive" },
-  { nombre: "Break-Thru S240", categoria: "Coadyuvante", ingredienteActivo: "Trisiloaxano 90%", fabricante: "Evonik" },
-  { nombre: "Agrotin", categoria: "Coadyuvante", ingredienteActivo: "Aceite mineral parafínico 83%", fabricante: "Nufarm" },
-  { nombre: "Citowett", categoria: "Coadyuvante", ingredienteActivo: "Alquilarilpoliglicoléter 40%", fabricante: "BASF" },
+const PRODUCTOS = [
+  { nombre: "2.4D", stock: 140, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Actirob", stock: 50, unidad: "L", categoria: "Coadyuvante" },
+  { nombre: "Advance Boro", stock: 20, unidad: "L", categoria: "Foliar" },
+  { nombre: "Affinity", stock: 4, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Aliado", stock: 140, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Amistar Opti", stock: 2, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Arrat", stock: 1.6, unidad: "kg", categoria: "Herbicida" },
+  { nombre: "Auxym", stock: 10, unidad: "L", categoria: "Foliar" },
+  { nombre: "Bacara Forte", stock: 5, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Basfoliar Kpremium", stock: 40, unidad: "L", categoria: "Foliar" },
+  { nombre: "Basfoliar Size SL", stock: 10, unidad: "L", categoria: "Foliar" },
+  { nombre: "Basfoliar zn 75-flo", stock: 20, unidad: "L", categoria: "Foliar" },
+  { nombre: "Basta", stock: 8, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Bentax Basagran", stock: 10, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Betanal expert", stock: 2, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Betanal max pro", stock: 25, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Betaprotect", stock: 10, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Bioforge", stock: 2, unidad: "L", categoria: "Foliar" },
+  { nombre: "BOND", stock: 40, unidad: "L", categoria: "Coadyuvante" },
+  { nombre: "Boro expert", stock: 30, unidad: "L", categoria: "Foliar" },
+  { nombre: "Botam Pro", stock: 30, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Bravo", stock: 30, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Bull", stock: 10, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Caiman", stock: 7, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Calcio expert", stock: 40, unidad: "L", categoria: "Foliar" },
+  { nombre: "Captan", stock: 5, unidad: "kg", categoria: "Fungicida" },
+  { nombre: "Carboxigram", stock: 20, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Celest", stock: 20, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Centurion super", stock: 10, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Closer", stock: 12, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Cobre expert", stock: 20, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Cuproso Cobre", stock: 35, unidad: "kg", categoria: "Fungicida" },
+  { nombre: "Curzate-Mancozeb-Manzate", stock: 13, unidad: "kg", categoria: "Fungicida" },
+  { nombre: "Dash", stock: 45, unidad: "L", categoria: "Coadyuvante" },
+  { nombre: "Delico", stock: 7.5, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Dropper", stock: 0.2, unidad: "L", categoria: "Coadyuvante" },
+  { nombre: "Dual gold", stock: 144, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Esteron Ten Ten", stock: 59.22, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Fastac", stock: 9, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Fertigram Bio", stock: 40, unidad: "L", categoria: "Foliar" },
+  { nombre: "Fierro expert", stock: 10, unidad: "L", categoria: "Foliar" },
+  { nombre: "Fitogram Mg", stock: 40, unidad: "L", categoria: "Foliar" },
+  { nombre: "Fitogram Pro B", stock: 100, unidad: "L", categoria: "Foliar" },
+  { nombre: "Flex", stock: 10, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Flow Kalzium + Boro", stock: 160, unidad: "L", categoria: "Foliar" },
+  { nombre: "Frontal", stock: 4, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Frontier", stock: 80, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Galant plus", stock: 10, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Gamit", stock: 1, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Granite", stock: 20, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Hidroxi cobre 50WG", stock: 90, unidad: "kg", categoria: "Fungicida" },
+  { nombre: "Humio 90", stock: 60, unidad: "L", categoria: "Foliar" },
+  { nombre: "Karate Zeon", stock: 2, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Kelpak", stock: 180, unidad: "L", categoria: "Foliar" },
+  { nombre: "Konan", stock: 1, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Linurex Tiburon", stock: 1, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Logran", stock: 200, unidad: "g", categoria: "Herbicida" },
+  { nombre: "Lontrel", stock: 3.79, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Magnesio expert", stock: 120, unidad: "L", categoria: "Foliar" },
+  { nombre: "Mancozeb", stock: 100, unidad: "kg", categoria: "Fungicida" },
+  { nombre: "Matrix", stock: 100, unidad: "g", categoria: "Herbicida" },
+  { nombre: "MCPA", stock: 90, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Mo + expert", stock: 10, unidad: "L", categoria: "Foliar" },
+  { nombre: "Molistop", stock: 14, unidad: "L", categoria: "Otros" },
+  { nombre: "N Large", stock: 0.1, unidad: "L", categoria: "Foliar" },
+  { nombre: "Nitrate Balancer", stock: 100, unidad: "L", categoria: "Foliar" },
+  { nombre: "Nutri Sync M", stock: 60, unidad: "L", categoria: "Foliar" },
+  { nombre: "Nutrifolha Phosphorus-K", stock: 60, unidad: "L", categoria: "Foliar" },
+  { nombre: "Nutrigram Pro", stock: 10, unidad: "L", categoria: "Foliar" },
+  { nombre: "Nuzol Plus", stock: 40, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Option Pro", stock: 1.2, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Oriol Pendimetalina Herbadox", stock: 20, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Paraquat", stock: 20, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Permetrina", stock: 5, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Pirimor", stock: 0.5, unidad: "kg", categoria: "Insecticida" },
+  { nombre: "Probion", stock: 120, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Proggib", stock: 640, unidad: "mL", categoria: "Foliar" },
+  { nombre: "Promalina", stock: 3.5, unidad: "L", categoria: "Foliar" },
+  { nombre: "Proponit", stock: 5, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Prosaro", stock: 5, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Pyramin", stock: 182, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Quetion Boro", stock: 8, unidad: "L", categoria: "Foliar" },
+  { nombre: "Quetion Mg Avellanos", stock: 140, unidad: "L", categoria: "Foliar" },
+  { nombre: "Quilate", stock: 4, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Reflect xtra", stock: 8, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Reglone", stock: 10, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Revus top", stock: 24, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Roundup controlmax ripper glifosato", stock: 705, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Safari", stock: 5.4, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Sagastim", stock: 24, unidad: "L", categoria: "Foliar" },
+  { nombre: "Scenic", stock: 3, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Score beta", stock: 5, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Serenade Avellano", stock: 80, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Silwet", stock: 47, unidad: "L", categoria: "Coadyuvante" },
+  { nombre: "Solutions bio-Foliar", stock: 80, unidad: "L", categoria: "Foliar" },
+  { nombre: "Stimulate", stock: 5, unidad: "L", categoria: "Foliar" },
+  { nombre: "Surround bloqueador liquido", stock: 160, unidad: "L", categoria: "Otros" },
+  { nombre: "Surround bloqueador polvo", stock: 87.5, unidad: "kg", categoria: "Otros" },
+  { nombre: "Sweet", stock: 80, unidad: "L", categoria: "Coadyuvante" },
+  { nombre: "Tordon", stock: 38, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Triflurex Treflan Trifluralina", stock: 200, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Tyllanex", stock: 200, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Uviamin Avellanos", stock: 60, unidad: "L", categoria: "Foliar" },
+  { nombre: "Valor 50 WP", stock: 17, unidad: "kg", categoria: "Fungicida" },
+  { nombre: "Venzar", stock: 3, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Verango prime", stock: 7, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Vibrance integral", stock: 80, unidad: "L", categoria: "Fungicida" },
+  { nombre: "Vigorseed ZN", stock: 200, unidad: "L", categoria: "Foliar" },
+  { nombre: "Zantara", stock: 4, unidad: "L", categoria: "Insecticida" },
+  { nombre: "Zero", stock: 0.5, unidad: "L", categoria: "Herbicida" },
+  { nombre: "Zoom", stock: 90, unidad: "L", categoria: "Herbicida" },
 ];
 
-// ── Estado global ──────────────────────────────────────────
-let isAdmin = false;
-let productos = [];
-let ingresos = [];
-let unsubProductos = null;
-let unsubIngresos = null;
-let filtroCategoria = "Todos";
-let busqueda = "";
-let tabActiva = "inventario";
+window.cargarInventario = async function() {
+  const btn = document.getElementById("btn-cargar");
+  const log = document.getElementById("log");
+  btn.disabled = true;
+  btn.textContent = "Cargando...";
+  log.innerHTML = "";
 
-// ── Login ──────────────────────────────────────────────────
-window.intentarLogin = function() {
-  const pin = document.getElementById("pin-input").value.trim();
-  if (!pin) { toast("Ingresá tu PIN", false); return; }
-  if (pin === ADMIN_PIN) {
-    isAdmin = true;
-    entrarApp();
-  } else {
-    toast("PIN incorrecto", false);
-    document.getElementById("pin-input").value = "";
-  }
-}
+  let ok = 0, err = 0;
 
-function entrarApp() {
-  document.getElementById("screen-login").style.display = "none";
-  document.getElementById("screen-app").style.display = "flex";
-  document.getElementById("user-label").textContent = isAdmin ? "⚙ Administrador" : "Operador";
-  document.getElementById("btn-nuevo").style.display = isAdmin ? "flex" : "none";
-  suscribirDatos();
-  setTab("inventario");
-}
-
-window.logout = function() {
-  isAdmin = false;
-  if (unsubProductos) unsubProductos();
-  if (unsubIngresos) unsubIngresos();
-  document.getElementById("screen-app").style.display = "none";
-  document.getElementById("screen-login").style.display = "flex";
-  document.getElementById("pin-input").value = "";
-}
-
-// ── Firestore ──────────────────────────────────────────────
-function suscribirDatos() {
-  // Productos en tiempo real
-  unsubProductos = onSnapshot(query(collection(db, "productos"), orderBy("nombre")), snap => {
-    productos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderInventario();
-    renderAlertas();
-    renderStats();
-  });
-
-  // Ingresos en tiempo real
-  unsubIngresos = onSnapshot(query(collection(db, "ingresos"), orderBy("ts", "desc")), snap => {
-    ingresos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderIngresos();
-    renderStats();
-  });
-}
-
-// ── Stats ──────────────────────────────────────────────────
-function renderStats() {
-  const total = productos.length;
-  const alertas = productos.filter(p => getEstado(p) !== "ok").length;
-  const agotados = productos.filter(p => getEstado(p) === "agotado").length;
-  const bajos = productos.filter(p => getEstado(p) === "bajo").length;
-  document.getElementById("stat-total").textContent = total;
-  document.getElementById("stat-alertas").textContent = alertas;
-  document.getElementById("stat-agotados").textContent = agotados;
-  document.getElementById("stat-bajos").textContent = bajos;
-}
-
-function getEstado(p) {
-  if (!p.stock || p.stock === 0) return "agotado";
-  if (p.stock <= (p.stockMinimo || 0)) return "bajo";
-  return "ok";
-}
-
-const estadoConfig = {
-  ok:      { label: "Normal",     color: "#16a34a", bg: "#dcfce7", dot: "#16a34a" },
-  bajo:    { label: "Stock bajo", color: "#b45309", bg: "#fef3c7", dot: "#d97706" },
-  agotado: { label: "Agotado",   color: "#dc2626", bg: "#fee2e2", dot: "#dc2626" },
-};
-
-const categoriaColor = {
-  Herbicida: "#4f7942", Fungicida: "#4a5568", Insecticida: "#7a4f2e",
-  Foliar: "#2b6cb0", Coadyuvante: "#6b46c1", Otros: "#6b7280",
-};
-
-// ── Tabs ───────────────────────────────────────────────────
-window.setTab = function(tab) {
-  tabActiva = tab;
-  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-  document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
-  document.getElementById("tab-" + tab).classList.add("active");
-  document.getElementById("tc-" + tab).classList.add("active");
-}
-
-// ── Inventario ─────────────────────────────────────────────
-window.setFiltro = function(cat) {
-  filtroCategoria = cat;
-  document.querySelectorAll(".chip-cat").forEach(c => c.classList.remove("active"));
-  event.target.classList.add("active");
-  renderInventario();
-}
-
-window.onBusqueda = function() {
-  busqueda = document.getElementById("input-busqueda").value.toLowerCase();
-  renderInventario();
-}
-
-function renderInventario() {
-  let data = productos.filter(p => {
-    const catOk = filtroCategoria === "Todos" || p.categoria === filtroCategoria;
-    const busOk = !busqueda || p.nombre.toLowerCase().includes(busqueda) || (p.ingredienteActivo || "").toLowerCase().includes(busqueda);
-    return catOk && busOk;
-  });
-
-  const tbody = document.getElementById("tabla-body");
-  if (!data.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:#9ca3af">No se encontraron productos</td></tr>`;
-    return;
+  for (const p of PRODUCTOS) {
+    try {
+      await addDoc(collection(db, "productos"), {
+        ...p,
+        stockMinimo: 0,
+        precio: 0,
+        ingredienteActivo: "",
+        fabricante: "",
+        proveedor: "",
+        cultivosCompatibles: "",
+        etiquetaUrl: "",
+        hojaUrl: "",
+        ts: Date.now(),
+      });
+      ok++;
+      log.innerHTML += `<div style="color:#16a34a;font-size:12px">✓ ${p.nombre}</div>`;
+    } catch(e) {
+      err++;
+      log.innerHTML += `<div style="color:#dc2626;font-size:12px">✗ ${p.nombre}: ${e.message}</div>`;
+    }
+    log.scrollTop = log.scrollHeight;
   }
 
-  tbody.innerHTML = data.map(p => {
-    const estado = getEstado(p);
-    const ec = estadoConfig[estado];
-    const cc = categoriaColor[p.categoria] || "#6b7280";
-    const hasEtiq = p.etiquetaUrl || p.etiquetaArchivo;
-    const hasHoja = p.hojaUrl || p.hojaArchivo;
-    return `<tr style="border-bottom:1px solid #f0f4f0;background:${estado==="agotado"?"#fff8f8":"#fff"}">
-      <td style="padding:12px 14px">
-        <div style="font-weight:600;color:#111827">${p.nombre}</div>
-        ${p.proveedor ? `<div style="font-size:11px;color:#9ca3af">${p.proveedor}</div>` : ""}
-      </td>
-      <td style="padding:12px 14px"><span style="background:${cc}18;color:${cc};padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600">${p.categoria}</span></td>
-      <td style="padding:12px 14px;font-size:12px;color:#374151">${p.ingredienteActivo || "—"}</td>
-      <td style="padding:12px 14px;font-size:12px;color:#6b7280">${p.fabricante || "—"}</td>
-      <td style="padding:12px 14px">
-        <div style="font-weight:700;font-size:15px;color:${p.stock <= (p.stockMinimo||0) ? "#dc2626":"#111827"}">${p.stock || 0} <span style="font-size:12px;font-weight:400;color:#9ca3af">${p.unidad||"L"}</span></div>
-        <div style="font-size:10px;color:#9ca3af">mín ${p.stockMinimo||0} ${p.unidad||"L"}</div>
-      </td>
-      <td style="padding:12px 14px">
-        <div style="display:flex;flex-direction:column;gap:4px">
-          ${hasEtiq ? `<a href="${p.etiquetaUrl||p.etiquetaArchivo}" target="_blank" style="background:#2b6cb018;color:#2b6cb0;border:1px solid #2b6cb033;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;text-decoration:none">🏷 Etiqueta</a>` : `<button onclick="abrirDocModal('${p.id}','etiqueta')" style="background:none;border:1px dashed #d1d5db;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;color:#9ca3af;text-align:left">+ Etiqueta</button>`}
-          ${hasHoja ? `<a href="${p.hojaUrl||p.hojaArchivo}" target="_blank" style="background:#6b46c118;color:#6b46c1;border:1px solid #6b46c133;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;text-decoration:none">🛡 Hoja seg.</a>` : `<button onclick="abrirDocModal('${p.id}','hoja')" style="background:none;border:1px dashed #d1d5db;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;color:#9ca3af;text-align:left">+ Hoja seg.</button>`}
-        </div>
-      </td>
-      <td style="padding:12px 14px">
-        <span style="background:${ec.bg};color:${ec.color};padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap">
-          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${ec.dot};margin-right:5px;vertical-align:middle"></span>${ec.label}
-        </span>
-      </td>
-      <td style="padding:12px 14px">
-        <div style="display:flex;gap:6px">
-          <button onclick="abrirAjuste('${p.id}')" title="Ajustar stock" style="background:#f0faf0;border:1px solid #c6dfc6;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:13px">⇅</button>
-          ${isAdmin ? `<button onclick="abrirEditar('${p.id}')" title="Editar" style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:13px">✏️</button>
-          <button onclick="eliminarProducto('${p.id}')" title="Eliminar" style="background:#fff0f0;border:1px solid #fecaca;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:13px">🗑</button>` : ""}
-        </div>
-      </td>
-    </tr>`;
-  }).join("");
-}
-
-// ── Alertas ────────────────────────────────────────────────
-function renderAlertas() {
-  const alertas = productos.filter(p => getEstado(p) !== "ok");
-  document.getElementById("tab-alertas").textContent = `🔔 Alertas${alertas.length > 0 ? ` (${alertas.length})` : ""}`;
-  const cont = document.getElementById("alertas-container");
-  if (!alertas.length) {
-    cont.innerHTML = `<div style="text-align:center;padding:60px;color:#6b7280"><div style="font-size:48px;margin-bottom:12px">✅</div><div style="font-weight:600">Sin alertas pendientes</div></div>`;
-    return;
-  }
-  cont.innerHTML = alertas.map(p => {
-    const ec = estadoConfig[getEstado(p)];
-    return `<div style="background:#fff;border:1px solid ${ec.dot}44;border-left:4px solid ${ec.dot};border-radius:10px;padding:14px 18px;margin-bottom:10px;display:flex;align-items:center;gap:16px">
-      <div style="flex:1">
-        <div style="font-weight:700;color:#111827">${p.nombre}</div>
-        <div style="font-size:12px;color:#6b7280;margin-top:2px">${p.ingredienteActivo || ""} · ${p.fabricante || ""}</div>
-      </div>
-      <div style="text-align:right">
-        <span style="background:${ec.bg};color:${ec.color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700">${ec.label}</span>
-        <div style="font-size:12px;color:#6b7280;margin-top:4px">Stock: ${p.stock||0} ${p.unidad||"L"} · Mín: ${p.stockMinimo||0}</div>
-      </div>
-      <button onclick="abrirAjuste('${p.id}')" style="background:#f0faf0;border:1px solid #c6dfc6;border-radius:8px;padding:7px 14px;cursor:pointer;font-weight:600;font-size:13px;white-space:nowrap">Ajustar stock</button>
+  btn.textContent = `Listo — ${ok} cargados${err > 0 ? `, ${err} errores` : ""}`;
+  document.getElementById("resultado").innerHTML = `
+    <div style="background:#dcfce7;border:1px solid #86efac;border-radius:10px;padding:16px;margin-top:16px;text-align:center">
+      <div style="font-size:24px;margin-bottom:8px">✅</div>
+      <div style="font-weight:700;color:#16a34a">${ok} productos cargados exitosamente</div>
+      <div style="font-size:13px;color:#15803d;margin-top:6px">Ya podés cerrar esta página y abrir el inventario</div>
+      <a href="https://inventariolosmaitenes.netlify.app" target="_blank"
+        style="display:inline-block;margin-top:12px;background:#1e3a1e;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">
+        Ir al inventario →
+      </a>
     </div>`;
-  }).join("");
 }
-
-// ── Ingresos ───────────────────────────────────────────────
-function renderIngresos() {
-  const pendientes = ingresos.filter(i => (i.itemsPendientes || []).length > 0);
-  document.getElementById("tab-ingresos").textContent = `📥 Ingresos${ingresos.length > 0 ? ` (${ingresos.length})` : ""}`;
-
-  // Panel pendientes
-  const panelPend = document.getElementById("panel-pendientes");
-  if (pendientes.length > 0) {
-    panelPend.style.display = "block";
-    panelPend.innerHTML = `<div style="font-weight:700;color:#92400e;margin-bottom:10px">⚠️ Productos nuevos pendientes de registrar</div>` +
-      pendientes.flatMap(ing => (ing.itemsPendientes||[]).map(item => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #fde68a">
-          <div>
-            <div style="font-weight:600;font-size:13px">${item.nombre}</div>
-            <div style="font-size:11px;color:#9ca3af">${item.cantidad} ${item.unidad} · ${ing.proveedor || "Sin proveedor"}</div>
-          </div>
-          <button onclick="abrirModalNuevoProducto('${ing.id}','${item.nombre}',${item.cantidad},'${item.unidad}',${item.precioUnitario||0},'${ing.proveedor||''}')"
-            style="background:#1e3a1e;color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-weight:600;font-size:12px">+ Registrar</button>
-        </div>`)).join("");
-  } else {
-    panelPend.style.display = "none";
-  }
-
-  // Historial
-  const hist = document.getElementById("historial-ingresos");
-  if (!ingresos.length) {
-    hist.innerHTML = `<div style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">Todavía no hay ingresos registrados</div>`;
-    return;
-  }
-  hist.innerHTML = `<div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:12px">Ingresos recientes</div>` +
-    ingresos.slice(0, 20).map(ing => `
-      <div style="background:#fff;border-radius:10px;border:1px solid #e5e7eb;padding:14px 16px;margin-bottom:8px">
-        <div style="font-weight:600;font-size:13px;color:#111827">${ing.proveedor || "Sin proveedor"}${ing.nroDocumento ? ` · Doc. ${ing.nroDocumento}` : ""}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px">${ing.fecha ? new Date(ing.ts).toLocaleDateString("es-CL", {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}</div>
-        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
-          ${(ing.items||[]).map(it => {
-            const pend = (ing.itemsPendientes||[]).some(p=>p.nombre===it.nombre);
-            return `<span style="background:${pend?"#fef3c7":"#f0faf0"};border:1px solid ${pend?"#fde68a":"#c6dfc6"};border-radius:6px;padding:2px 8px;font-size:11px;color:${pend?"#92400e":"#1e3a1e"}">${pend?"⚠️ ":""}${it.nombre} · ${it.cantidad} ${it.unidad}</span>`;
-          }).join("")}
-        </div>
-      </div>`).join("");
-}
-
-// ── Modal Ajuste ───────────────────────────────────────────
-let ajusteProductoId = null;
-window.abrirAjuste = function(id) {
-  const p = productos.find(x => x.id === id);
-  if (!p) return;
-  ajusteProductoId = id;
-  document.getElementById("ajuste-nombre").textContent = p.nombre;
-  document.getElementById("ajuste-stock-actual").textContent = `Stock actual: ${p.stock||0} ${p.unidad||"L"}`;
-  document.getElementById("ajuste-cantidad").value = "";
-  document.getElementById("ajuste-motivo").value = "";
-  document.getElementById("ajuste-tipo-entrada").classList.add("active");
-  document.getElementById("ajuste-tipo-salida").classList.remove("active");
-  document.getElementById("modal-ajuste").style.display = "flex";
-}
-
-window.setTipoAjuste = function(tipo) {
-  document.getElementById("ajuste-tipo-entrada").classList.toggle("active", tipo==="entrada");
-  document.getElementById("ajuste-tipo-salida").classList.toggle("active", tipo==="salida");
-}
-
-window.confirmarAjuste = async function() {
-  const p = productos.find(x => x.id === ajusteProductoId);
-  if (!p) return;
-  const entrada = document.getElementById("ajuste-tipo-entrada").classList.contains("active");
-  const cant = Number(document.getElementById("ajuste-cantidad").value);
-  if (!cant) { toast("Ingresá una cantidad", false); return; }
-  const nuevoStock = entrada ? (p.stock||0) + cant : Math.max(0, (p.stock||0) - cant);
-  await updateDoc(doc(db, "productos", ajusteProductoId), { stock: nuevoStock });
-  cerrarModal("modal-ajuste");
-  toast(`✓ Stock actualizado: ${nuevoStock} ${p.unidad||"L"}`, true);
-}
-
-// ── Modal Producto (nuevo/editar) ──────────────────────────
-let editProductoId = null;
-let sugerencias = [];
-
-window.abrirNuevo = function() {
-  if (!isAdmin) return;
-  editProductoId = null;
-  document.getElementById("modal-prod-titulo").textContent = "Nuevo producto";
-  limpiarFormProd();
-  document.getElementById("modal-producto").style.display = "flex";
-}
-
-window.abrirEditar = function(id) {
-  const p = productos.find(x => x.id === id);
-  if (!p) return;
-  editProductoId = id;
-  document.getElementById("modal-prod-titulo").textContent = "Editar producto";
-  document.getElementById("prod-nombre").value = p.nombre || "";
-  document.getElementById("prod-categoria").value = p.categoria || "Herbicida";
-  document.getElementById("prod-ingrediente").value = p.ingredienteActivo || "";
-  document.getElementById("prod-fabricante").value = p.fabricante || "";
-  document.getElementById("prod-proveedor").value = p.proveedor || "";
-  document.getElementById("prod-cultivos").value = p.cultivosCompatibles || "";
-  document.getElementById("prod-stock").value = p.stock || 0;
-  document.getElementById("prod-unidad").value = p.unidad || "L";
-  document.getElementById("prod-minimo").value = p.stockMinimo || 0;
-  document.getElementById("prod-precio").value = p.precio || 0;
-  document.getElementById("prod-etiqueta-url").value = p.etiquetaUrl || "";
-  document.getElementById("prod-hoja-url").value = p.hojaUrl || "";
-  document.getElementById("modal-producto").style.display = "flex";
-}
-
-function limpiarFormProd() {
-  ["prod-nombre","prod-ingrediente","prod-fabricante","prod-proveedor","prod-cultivos","prod-etiqueta-url","prod-hoja-url"].forEach(id => document.getElementById(id).value = "");
-  document.getElementById("prod-categoria").value = "Herbicida";
-  document.getElementById("prod-unidad").value = "L";
-  document.getElementById("prod-stock").value = 0;
-  document.getElementById("prod-minimo").value = 0;
-  document.getElementById("prod-precio").value = 0;
-}
-
-window.onNombreChange = function() {
-  const val = document.getElementById("prod-nombre").value;
-  if (val.length < 2) { document.getElementById("autocomplete").innerHTML = ""; return; }
-  const matches = CATALOGO.filter(c => c.nombre.toLowerCase().includes(val.toLowerCase())).slice(0, 7);
-  document.getElementById("autocomplete").innerHTML = matches.map(s => `
-    <div onclick="elegirSugerencia(${JSON.stringify(s).replace(/"/g,'&quot;')})"
-      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-weight:600;font-size:13px">${s.nombre}</div>
-        <div style="font-size:11px;color:#6b7280">${s.ingredienteActivo}</div>
-      </div>
-      <span style="font-size:11px;color:#9ca3af">${s.fabricante}</span>
-    </div>`).join("");
-}
-
-window.elegirSugerencia = function(s) {
-  document.getElementById("prod-nombre").value = s.nombre;
-  document.getElementById("prod-categoria").value = s.categoria;
-  document.getElementById("prod-ingrediente").value = s.ingredienteActivo;
-  document.getElementById("prod-fabricante").value = s.fabricante;
-  document.getElementById("autocomplete").innerHTML = "";
-}
-
-window.guardarProducto = async function() {
-  const nombre = document.getElementById("prod-nombre").value.trim();
-  if (!nombre) { toast("El nombre es obligatorio", false); return; }
-  const data = {
-    nombre,
-    categoria: document.getElementById("prod-categoria").value,
-    ingredienteActivo: document.getElementById("prod-ingrediente").value.trim(),
-    fabricante: document.getElementById("prod-fabricante").value.trim(),
-    proveedor: document.getElementById("prod-proveedor").value.trim(),
-    cultivosCompatibles: document.getElementById("prod-cultivos").value.trim(),
-    stock: Number(document.getElementById("prod-stock").value) || 0,
-    unidad: document.getElementById("prod-unidad").value,
-    stockMinimo: Number(document.getElementById("prod-minimo").value) || 0,
-    precio: Number(document.getElementById("prod-precio").value) || 0,
-    etiquetaUrl: document.getElementById("prod-etiqueta-url").value.trim(),
-    hojaUrl: document.getElementById("prod-hoja-url").value.trim(),
-    ts: Date.now(),
-  };
-  if (editProductoId) {
-    await updateDoc(doc(db, "productos", editProductoId), data);
-    toast("✓ Producto actualizado", true);
-  } else {
-    await addDoc(collection(db, "productos"), data);
-    toast("✓ Producto agregado", true);
-  }
-  cerrarModal("modal-producto");
-}
-
-window.eliminarProducto = async function(id) {
-  if (!isAdmin) return;
-  if (!confirm("¿Eliminar este producto?")) return;
-  await deleteDoc(doc(db, "productos", id));
-  toast("Producto eliminado", false);
-}
-
-// ── Modal Doc rápido ───────────────────────────────────────
-let docModalProductoId = null;
-let docModalTipo = null;
-
-window.abrirDocModal = function(id, tipo) {
-  docModalProductoId = id;
-  docModalTipo = tipo;
-  const p = productos.find(x => x.id === id);
-  document.getElementById("doc-modal-titulo").textContent = tipo === "etiqueta" ? "🏷 Etiqueta · " + p.nombre : "🛡 Hoja de seguridad · " + p.nombre;
-  document.getElementById("doc-url-input").value = tipo === "etiqueta" ? (p.etiquetaUrl||"") : (p.hojaUrl||"");
-  document.getElementById("modal-doc").style.display = "flex";
-}
-
-window.guardarDoc = async function() {
-  const url = document.getElementById("doc-url-input").value.trim();
-  const campo = docModalTipo === "etiqueta" ? "etiquetaUrl" : "hojaUrl";
-  await updateDoc(doc(db, "productos", docModalProductoId), { [campo]: url });
-  cerrarModal("modal-doc");
-  toast("✓ Documento guardado", true);
-}
-
-// ── Ingreso por foto ───────────────────────────────────────
-let ingresoImagenBase64 = null;
-let ingresoImagenMime = null;
-let ingresoItemsLeidos = [];
-let ingresoProveedor = "";
-let ingresoNroDoc = "";
-let etapaIngreso = "inicio"; // inicio | leyendo | revision | pin
-
-window.onFotoIngreso = async function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  if (file.size > 4 * 1024 * 1024) { toast("Máximo 4 MB", false); return; }
-  const reader = new FileReader();
-  reader.onload = async () => {
-    ingresoImagenBase64 = reader.result.split(",")[1];
-    ingresoImagenMime = file.type;
-    document.getElementById("preview-foto").src = reader.result;
-    document.getElementById("preview-foto").style.display = "block";
-    setEtapaIngreso("leyendo");
-    await leerDocumentoIA();
-  };
-  reader.readAsDataURL(file);
-}
-
-async function leerDocumentoIA() {
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: ingresoImagenMime, data: ingresoImagenBase64 } },
-            { type: "text", text: `Analiza este documento (guía de despacho, factura o boleta chilena) y extrae los productos agroquímicos. Responde SOLO con JSON válido sin backticks:\n{"proveedor":"nombre empresa emisora o vacío","nroDocumento":"número o vacío","items":[{"nombre":"nombre comercial","cantidad":número,"unidad":"L o kg o g o mL","precioUnitario":número o 0}]}` }
-          ]
-        }]
-      })
-    });
-    const data = await response.json();
-    const texto = data.content?.map(c => c.text||"").join("").trim();
-    const parsed = JSON.parse(texto);
-    ingresoItemsLeidos = parsed.items || [];
-    ingresoProveedor = parsed.proveedor || "";
-    ingresoNroDoc = parsed.nroDocumento || "";
-    document.getElementById("ingreso-proveedor").value = ingresoProveedor;
-    document.getElementById("ingreso-nrodoc").value = ingresoNroDoc;
-    renderItemsIngreso();
-    setEtapaIngreso("revision");
-  } catch(e) {
-    toast("No se pudo leer el documento. Intentá con otra foto.", false);
-    setEtapaIngreso("inicio");
-  }
-}
-
-function renderItemsIngreso() {
-  const cont = document.getElementById("items-ingreso");
-  cont.innerHTML = ingresoItemsLeidos.map((item, idx) => {
-    const enInventario = productos.some(p => p.nombre.toLowerCase() === item.nombre.toLowerCase());
-    return `<div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-        <div style="flex:1;margin-right:8px">
-          <input value="${item.nombre}" oninput="ingresoItemsLeidos[${idx}].nombre=this.value" placeholder="Nombre del producto"
-            style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;box-sizing:border-box">
-          <div style="font-size:10px;margin-top:3px;color:${enInventario?"#16a34a":"#d97706"}">${enInventario?"✓ Encontrado en inventario":"⚠️ Producto nuevo"}</div>
-        </div>
-        <button onclick="ingresoItemsLeidos.splice(${idx},1);renderItemsIngreso()" style="background:#fee2e2;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;color:#dc2626">🗑</button>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div><label style="font-size:10px;color:#6b7280">Cantidad</label>
-          <input type="number" value="${item.cantidad}" oninput="ingresoItemsLeidos[${idx}].cantidad=Number(this.value)"
-            style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;box-sizing:border-box"></div>
-        <div><label style="font-size:10px;color:#6b7280">Unidad</label>
-          <select oninput="ingresoItemsLeidos[${idx}].unidad=this.value" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;box-sizing:border-box">
-            ${UNIDADES.map(u=>`<option ${u===item.unidad?"selected":""}>${u}</option>`).join("")}
-          </select></div>
-        <div><label style="font-size:10px;color:#6b7280">Precio unit. $</label>
-          <input type="number" value="${item.precioUnitario||0}" oninput="ingresoItemsLeidos[${idx}].precioUnitario=Number(this.value)"
-            style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;box-sizing:border-box"></div>
-      </div>
-    </div>`;
-  }).join("") + `<button onclick="ingresoItemsLeidos.push({nombre:'',cantidad:1,unidad:'L',precioUnitario:0});renderItemsIngreso()"
-    style="width:100%;background:none;border:1px dashed #c6dfc6;border-radius:8px;padding:10px;cursor:pointer;color:#4f7942;font-size:13px;font-weight:600">+ Agregar producto manualmente</button>`;
-}
-
-function setEtapaIngreso(etapa) {
-  etapaIngreso = etapa;
-  document.getElementById("etapa-inicio").style.display = etapa === "inicio" ? "block" : "none";
-  document.getElementById("etapa-leyendo").style.display = etapa === "leyendo" ? "block" : "none";
-  document.getElementById("etapa-revision").style.display = etapa === "revision" ? "block" : "none";
-  document.getElementById("etapa-pin").style.display = etapa === "pin" ? "block" : "none";
-}
-
-window.solicitarPin = function() {
-  if (!ingresoItemsLeidos.length) { toast("No hay productos para registrar", false); return; }
-  ingresoProveedor = document.getElementById("ingreso-proveedor").value.trim();
-  ingresoNroDoc = document.getElementById("ingreso-nrodoc").value.trim();
-  document.getElementById("pin-resumen").innerHTML = `
-    ${ingresoProveedor ? `<div style="font-size:12px;color:#374151;margin-bottom:4px">🏢 ${ingresoProveedor} ${ingresoNroDoc?"· Doc. "+ingresoNroDoc:""}</div>` : ""}
-    ${ingresoItemsLeidos.map(it=>`<div style="font-size:12px;padding:3px 0;border-bottom:1px solid #e5e7eb">${it.nombre} · <strong>${it.cantidad} ${it.unidad}</strong>${it.precioUnitario>0?` · $${Number(it.precioUnitario).toLocaleString("es-CL")}`:""}</div>`).join("")}`;
-  document.getElementById("pin-ingreso-input").value = "";
-  document.getElementById("pin-ingreso-error").style.display = "none";
-  setEtapaIngreso("pin");
-}
-
-window.confirmarIngreso = async function() {
-  const pin = document.getElementById("pin-ingreso-input").value.trim();
-  if (pin !== ADMIN_PIN) {
-    document.getElementById("pin-ingreso-error").style.display = "block";
-    return;
-  }
-
-  // Separar conocidos vs nuevos
-  const conocidos = ingresoItemsLeidos.filter(it => productos.some(p => p.nombre.toLowerCase() === it.nombre.toLowerCase()));
-  const nuevos = ingresoItemsLeidos.filter(it => !productos.some(p => p.nombre.toLowerCase() === it.nombre.toLowerCase()));
-
-  // Actualizar stock de conocidos
-  for (const item of conocidos) {
-    const p = productos.find(x => x.nombre.toLowerCase() === item.nombre.toLowerCase());
-    await updateDoc(doc(db, "productos", p.id), { stock: (p.stock||0) + Number(item.cantidad), precio: item.precioUnitario || p.precio });
-  }
-
-  // Guardar ingreso en Firestore
-  await addDoc(collection(db, "ingresos"), {
-    proveedor: ingresoProveedor,
-    nroDocumento: ingresoNroDoc,
-    items: ingresoItemsLeidos,
-    itemsPendientes: nuevos,
-    fecha: new Date().toISOString(),
-    ts: Date.now(),
-  });
-
-  // Reset
-  ingresoItemsLeidos = [];
-  ingresoProveedor = "";
-  ingresoNroDoc = "";
-  ingresoImagenBase64 = null;
-  document.getElementById("preview-foto").style.display = "none";
-  document.getElementById("foto-input").value = "";
-  setEtapaIngreso("inicio");
-  toast("✓ Ingreso confirmado y stock actualizado", true);
-  setTab("ingresos");
-}
-
-// ── Modal Nuevo Producto desde Ingreso ────────────────────
-let npIngresoId = null;
-let npNombre = null;
-
-window.abrirModalNuevoProducto = function(ingresoId, nombre, cantidad, unidad, precio, proveedor) {
-  npIngresoId = ingresoId;
-  npNombre = nombre;
-  const enCatalogo = CATALOGO.find(c => c.nombre.toLowerCase() === nombre.toLowerCase());
-  document.getElementById("np-nombre").value = nombre;
-  document.getElementById("np-categoria").value = enCatalogo?.categoria || "Herbicida";
-  document.getElementById("np-ingrediente").value = enCatalogo?.ingredienteActivo || "";
-  document.getElementById("np-fabricante").value = enCatalogo?.fabricante || "";
-  document.getElementById("np-proveedor").value = proveedor || "";
-  document.getElementById("np-cultivos").value = "";
-  document.getElementById("np-stock").value = cantidad;
-  document.getElementById("np-unidad").value = unidad;
-  document.getElementById("np-minimo").value = 0;
-  document.getElementById("np-precio").value = precio || 0;
-  document.getElementById("np-etiqueta").value = "";
-  document.getElementById("np-hoja").value = "";
-  document.getElementById("modal-nuevo-producto").style.display = "flex";
-}
-
-window.guardarNuevoProducto = async function() {
-  const nombre = document.getElementById("np-nombre").value.trim();
-  if (!nombre) { toast("El nombre es obligatorio", false); return; }
-  const data = {
-    nombre,
-    categoria: document.getElementById("np-categoria").value,
-    ingredienteActivo: document.getElementById("np-ingrediente").value.trim(),
-    fabricante: document.getElementById("np-fabricante").value.trim(),
-    proveedor: document.getElementById("np-proveedor").value.trim(),
-    cultivosCompatibles: document.getElementById("np-cultivos").value.trim(),
-    stock: Number(document.getElementById("np-stock").value) || 0,
-    unidad: document.getElementById("np-unidad").value,
-    stockMinimo: Number(document.getElementById("np-minimo").value) || 0,
-    precio: Number(document.getElementById("np-precio").value) || 0,
-    etiquetaUrl: document.getElementById("np-etiqueta").value.trim(),
-    hojaUrl: document.getElementById("np-hoja").value.trim(),
-    ts: Date.now(),
-  };
-  await addDoc(collection(db, "productos"), data);
-  // Quitar de pendientes del ingreso
-  const ing = ingresos.find(x => x.id === npIngresoId);
-  if (ing) {
-    const newPend = (ing.itemsPendientes||[]).filter(it => it.nombre !== npNombre);
-    await updateDoc(doc(db, "ingresos", npIngresoId), { itemsPendientes: newPend });
-  }
-  cerrarModal("modal-nuevo-producto");
-  toast("✓ Producto agregado al inventario", true);
-}
-
-// ── Helpers ────────────────────────────────────────────────
-window.cerrarModal = function(id) { document.getElementById(id).style.display = "none"; }
-
-function toast(msg, ok=true) {
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.className = "toast" + (ok ? " success" : "");
-  setTimeout(() => t.classList.add("show"), 10);
-  setTimeout(() => t.classList.remove("show"), 2800);
-}
-
-window.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("pin-input").addEventListener("keydown", e => { if(e.key==="Enter") intentarLogin(); });
-});
 </script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
-:root{--verde:#1e3a1e;--verde-med:#2d5a1e;--verde-claro:#f0f4f0;--borde:#dce8dc;--blanco:#fff;--acero:#6b7280;--negro:#111827;--amarillo:#d97706;--rojo:#dc2626;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;}
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:var(--sans);background:#f0f4f0;color:var(--negro);min-height:100vh;}
-.screen{display:none;flex-direction:column;min-height:100vh;}
-#screen-login{align-items:center;justify-content:center;padding:24px;}
-.login-card{background:#fff;border:1px solid var(--borde);border-radius:12px;padding:32px 24px;width:100%;max-width:340px;text-align:center;}
-.login-icon{font-size:36px;background:var(--verde);width:60px;height:60px;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;}
-.login-card h1{font-family:var(--mono);font-size:17px;font-weight:600;margin-bottom:4px;}
-.login-card p{font-size:13px;color:var(--acero);margin-bottom:24px;}
-.pin-wrap{display:flex;justify-content:center;margin-bottom:16px;}
-.pin-wrap input{font-family:var(--mono);font-size:28px;letter-spacing:10px;text-align:center;width:160px;padding:12px;border:2px solid var(--borde);border-radius:8px;background:#f6faf6;}
-.pin-wrap input:focus{outline:none;border-color:var(--verde);}
-header{background:var(--verde);padding:0 20px;display:flex;align-items:center;justify-content:space-between;height:56px;position:sticky;top:0;z-index:100;}
-.header-left{display:flex;align-items:center;gap:10px;}
-.logo-icon{font-size:20px;background:#2d5a1e;width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;}
-header h1{font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#fff;}
-.header-right{display:flex;align-items:center;gap:8px;}
-.user-badge{font-size:12px;color:#a3c4a3;}
-.btn-logout{background:none;border:1px solid #4b7a4b;color:#a3c4a3;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;}
-.tabs{background:#152b15;display:flex;padding:0 16px;overflow-x:auto;scrollbar-width:none;flex-shrink:0;}
-.tabs::-webkit-scrollbar{display:none;}
-.tab{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#6b9b6b;padding:12px 16px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;background:none;border-left:none;border-right:none;border-top:none;}
-.tab.active{color:#a3e4a3;border-bottom-color:#a3e4a3;}
-main{max-width:1180px;margin:0 auto;padding:20px 16px;flex:1;}
-.tab-content{display:none;}
-.tab-content.active{display:block;}
-.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
-@media(max-width:600px){.stats-grid{grid-template-columns:1fr 1fr;}}
-.stat-card{background:#fff;border-radius:10px;padding:16px 20px;border:1px solid var(--borde);display:flex;align-items:center;gap:14px;}
-.stat-icon{font-size:26px;}
-.stat-val{font-family:var(--mono);font-size:26px;font-weight:800;line-height:1;}
-.stat-lbl{font-size:12px;color:var(--acero);margin-top:2px;}
-.filtros-bar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center;}
-.filtros-bar input{flex:1;min-width:200px;border:1px solid var(--borde);border-radius:8px;padding:8px 14px;font-size:13px;background:#fff;outline:none;}
-.chips-cat{display:flex;gap:6px;flex-wrap:wrap;}
-.chip-cat{padding:6px 13px;border-radius:20px;border:1px solid;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:#4b5563;border-color:#d1d5d1;transition:all .15s;}
-.chip-cat.active{background:var(--verde);color:#fff;border-color:var(--verde);}
-.btn{padding:9px 18px;border:none;border-radius:8px;font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
-.btn-prim{background:var(--verde-med);color:#fff;}
-.btn-sec{background:#f3f4f6;color:#374151;border:1px solid #d1d5db;}
-.btn-verde{background:var(--verde);color:#fff;width:100%;justify-content:center;padding:12px;}
-.table-wrap{background:#fff;border-radius:12px;border:1px solid var(--borde);overflow:hidden;}
-table{width:100%;border-collapse:collapse;font-size:13px;}
-thead tr{background:#f6faf6;border-bottom:1px solid var(--borde);}
-th{padding:11px 14px;text-align:left;font-weight:600;color:#374151;font-size:12px;white-space:nowrap;}
-.modal-overlay{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:50;padding:16px;}
-.modal-box{background:#fff;border-radius:14px;padding:28px;width:100%;max-width:520px;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px #0004;}
-.modal-title{font-size:17px;font-weight:700;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;}
-.modal-close{background:none;border:none;font-size:22px;cursor:pointer;color:var(--acero);}
-.field{margin-bottom:14px;}
-.field label{display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em;}
-.field input,.field select,.field textarea{width:100%;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:13px;background:#fff;outline:none;box-sizing:border-box;color:#111827;font-family:var(--sans);}
-.field input:focus,.field select:focus{border-color:var(--verde);}
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-.section-label{font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 10px;padding-top:10px;border-top:1px solid #f0f4f0;}
-.autocomplete-list{background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 24px #0002;overflow:hidden;margin-top:2px;}
-.modal-actions{display:flex;gap:10px;margin-top:16px;}
-.tipo-btn{flex:1;padding:10px;border:2px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-weight:600;cursor:pointer;font-size:13px;}
-.tipo-btn.active{background:var(--verde);color:#fff;border-color:var(--verde);}
-.ingreso-zona{background:#fff;border-radius:14px;border:2px dashed #c6dfc6;padding:32px;text-align:center;cursor:pointer;margin-bottom:20px;}
-.ingreso-zona:hover{border-color:var(--verde);}
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--negro);color:#fff;padding:11px 22px;border-radius:8px;font-size:14px;font-weight:500;z-index:999;transition:transform .3s;white-space:nowrap;}
-.toast.show{transform:translateX(-50%) translateY(0);}
-.toast.success{border-left:4px solid #a3e4a3;}
+body{font-family:system-ui,sans-serif;background:#f0f4f0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.card{background:#fff;border-radius:14px;padding:32px;max-width:500px;width:100%;box-shadow:0 4px 24px #0001;}
+h1{font-size:20px;font-weight:700;margin-bottom:8px;color:#1e3a1e;}
+p{font-size:14px;color:#6b7280;margin-bottom:24px;}
+button{background:#1e3a1e;color:#fff;border:none;border-radius:8px;padding:14px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;}
+button:disabled{opacity:.6;cursor:not-allowed;}
+#log{margin-top:16px;max-height:300px;overflow-y:auto;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;}
 </style>
 </head>
 <body>
-
-<!-- LOGIN -->
-<div id="screen-login" class="screen" style="display:flex">
-  <div class="login-card">
-    <div class="login-icon">🌱</div>
-    <h1>Los Maitenes</h1>
-    <p>Inventario Agroquímicos</p>
-    <div class="pin-wrap">
-      <input type="password" id="pin-input" placeholder="••••" maxlength="8" inputmode="numeric">
-    </div>
-    <button class="btn btn-verde" onclick="intentarLogin()">Ingresar</button>
-  </div>
+<div class="card">
+  <h1>🌱 Carga inicial de inventario</h1>
+  <p>Esta página carga los <strong>107 productos</strong> del inventario actual de Agrícola Los Maitenes directamente a Firebase. Usala solo una vez.</p>
+  <button id="btn-cargar" onclick="cargarInventario()">Cargar inventario a Firebase</button>
+  <div id="log"></div>
+  <div id="resultado"></div>
 </div>
-
-<!-- APP -->
-<div id="screen-app" class="screen">
-  <header>
-    <div class="header-left">
-      <div class="logo-icon">🌱</div>
-      <h1>AgroInventario · Los Maitenes</h1>
-    </div>
-    <div class="header-right">
-      <span class="user-badge" id="user-label"></span>
-      <button class="btn-logout" onclick="logout()">Salir</button>
-    </div>
-  </header>
-
-  <div class="tabs">
-    <button class="tab active" id="tab-inventario" onclick="setTab('inventario')">📋 Inventario</button>
-    <button class="tab" id="tab-ingresos" onclick="setTab('ingresos')">📥 Ingresos</button>
-    <button class="tab" id="tab-alertas" onclick="setTab('alertas')">🔔 Alertas</button>
-  </div>
-
-  <main>
-    <!-- INVENTARIO -->
-    <div id="tc-inventario" class="tab-content active">
-      <div class="stats-grid">
-        <div class="stat-card"><span class="stat-icon">📦</span><div><div class="stat-val" id="stat-total">0</div><div class="stat-lbl">Productos</div></div></div>
-        <div class="stat-card"><span class="stat-icon">⚠️</span><div><div class="stat-val" id="stat-alertas" style="color:#b45309">0</div><div class="stat-lbl">Alertas</div></div></div>
-        <div class="stat-card"><span class="stat-icon">🚫</span><div><div class="stat-val" id="stat-agotados" style="color:#dc2626">0</div><div class="stat-lbl">Agotados</div></div></div>
-        <div class="stat-card"><span class="stat-icon">📉</span><div><div class="stat-val" id="stat-bajos" style="color:#d97706">0</div><div class="stat-lbl">Stock bajo</div></div></div>
-      </div>
-
-      <div class="filtros-bar">
-        <input id="input-busqueda" placeholder="Buscar por nombre o ingrediente activo..." oninput="onBusqueda()">
-        <button class="btn btn-prim" id="btn-nuevo" onclick="abrirNuevo()" style="display:none">+ Nuevo producto</button>
-      </div>
-
-      <div class="chips-cat" style="margin-bottom:16px">
-        <button class="chip-cat active" onclick="setFiltro('Todos')">Todos</button>
-        <button class="chip-cat" onclick="setFiltro('Herbicida')">Herbicida</button>
-        <button class="chip-cat" onclick="setFiltro('Fungicida')">Fungicida</button>
-        <button class="chip-cat" onclick="setFiltro('Insecticida')">Insecticida</button>
-        <button class="chip-cat" onclick="setFiltro('Foliar')">Foliar</button>
-        <button class="chip-cat" onclick="setFiltro('Coadyuvante')">Coadyuvante</button>
-        <button class="chip-cat" onclick="setFiltro('Otros')">Otros</button>
-      </div>
-
-      <div class="table-wrap" style="overflow-x:auto">
-        <table>
-          <thead>
-            <tr>
-              <th>Producto</th><th>Categoría</th><th>Ingrediente activo</th><th>Fabricante</th>
-              <th>Stock</th><th>Documentos</th><th>Estado</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="tabla-body">
-            <tr><td colspan="8" style="text-align:center;padding:40px;color:#9ca3af">Cargando...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- INGRESOS -->
-    <div id="tc-ingresos" class="tab-content">
-      <!-- Pendientes -->
-      <div id="panel-pendientes" style="display:none;background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:20px;"></div>
-
-      <!-- Etapa inicio -->
-      <div id="etapa-inicio">
-        <div class="ingreso-zona" onclick="document.getElementById('foto-input').click()">
-          <div style="font-size:48px;margin-bottom:10px">📸</div>
-          <div style="font-weight:700;font-size:16px;color:var(--verde);margin-bottom:6px">Registrar ingreso de bodega</div>
-          <div style="font-size:13px;color:#6b7280">Sacá foto o subí la guía de despacho o factura</div>
-          <div style="font-size:11px;color:#9ca3af;margin-top:6px">JPG, PNG · máx 4 MB</div>
-        </div>
-        <input id="foto-input" type="file" accept="image/*" capture="environment" onchange="onFotoIngreso(event)" style="display:none">
-        <img id="preview-foto" style="display:none;max-width:200px;border-radius:10px;margin-bottom:16px">
-        <div id="historial-ingresos"></div>
-      </div>
-
-      <!-- Etapa leyendo -->
-      <div id="etapa-leyendo" style="display:none;text-align:center;padding:60px 0">
-        <div style="font-size:48px;margin-bottom:16px">🔍</div>
-        <div style="font-weight:700;font-size:16px;color:var(--verde);margin-bottom:8px">Leyendo el documento...</div>
-        <div style="font-size:13px;color:#6b7280">Identificando productos, cantidades y precios</div>
-      </div>
-
-      <!-- Etapa revisión -->
-      <div id="etapa-revision" style="display:none">
-        <div style="font-weight:700;font-size:15px;margin-bottom:16px">Revisar ingreso antes de confirmar</div>
-        <div class="grid-2" style="margin-bottom:14px">
-          <div class="field"><label>Proveedor / Razón social</label><input id="ingreso-proveedor" placeholder="Nombre del proveedor"></div>
-          <div class="field"><label>N° documento</label><input id="ingreso-nrodoc" placeholder="Factura / guía"></div>
-        </div>
-        <div id="items-ingreso"></div>
-        <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;margin:14px 0">
-          🔐 El administrador debe confirmar con su PIN para actualizar el stock
-        </div>
-        <div style="display:flex;gap:10px">
-          <button class="btn btn-sec" onclick="setEtapaIngreso('inicio')">Cancelar</button>
-          <button class="btn btn-prim" style="flex:1;justify-content:center" onclick="solicitarPin()">Solicitar confirmación →</button>
-        </div>
-      </div>
-
-      <!-- Etapa PIN -->
-      <div id="etapa-pin" style="display:none;max-width:360px;margin:0 auto;padding-top:20px">
-        <div style="text-align:center;margin-bottom:24px">
-          <div style="font-size:48px;margin-bottom:10px">🔐</div>
-          <div style="font-weight:700;font-size:17px;color:var(--verde)">Confirmación del administrador</div>
-        </div>
-        <div style="background:#f6faf6;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:12px" id="pin-resumen"></div>
-        <div class="field">
-          <label>PIN de administrador</label>
-          <input type="password" id="pin-ingreso-input" placeholder="••••" maxlength="8"
-            style="font-size:22px;letter-spacing:8px;text-align:center"
-            onkeydown="if(event.key==='Enter')confirmarIngreso()">
-          <div id="pin-ingreso-error" style="display:none;color:#dc2626;font-size:12px;margin-top:6px;text-align:center">PIN incorrecto. Intentá de nuevo.</div>
-        </div>
-        <div style="display:flex;gap:10px">
-          <button class="btn btn-sec" onclick="setEtapaIngreso('revision')">← Volver</button>
-          <button class="btn btn-verde" style="flex:1" onclick="confirmarIngreso()">Confirmar ingreso</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ALERTAS -->
-    <div id="tc-alertas" class="tab-content">
-      <div id="alertas-container"></div>
-    </div>
-  </main>
-</div>
-
-<!-- MODAL AJUSTE -->
-<div class="modal-overlay" id="modal-ajuste" onclick="if(event.target===this)cerrarModal('modal-ajuste')">
-  <div class="modal-box">
-    <div class="modal-title"><span id="ajuste-nombre"></span><button class="modal-close" onclick="cerrarModal('modal-ajuste')">×</button></div>
-    <div style="background:#f6faf6;border-radius:8px;padding:12px 14px;font-size:13px;margin-bottom:16px" id="ajuste-stock-actual"></div>
-    <div class="field"><label>Tipo de movimiento</label>
-      <div style="display:flex;gap:8px">
-        <button class="tipo-btn active" id="ajuste-tipo-entrada" onclick="setTipoAjuste('entrada')">📥 Entrada</button>
-        <button class="tipo-btn" id="ajuste-tipo-salida" onclick="setTipoAjuste('salida')">📤 Salida</button>
-      </div>
-    </div>
-    <div class="field"><label>Cantidad</label><input type="number" id="ajuste-cantidad" placeholder="0" min="0"></div>
-    <div class="field"><label>Motivo (opcional)</label><input id="ajuste-motivo" placeholder="Ej: compra, aplicación, merma..."></div>
-    <div class="modal-actions">
-      <button class="btn btn-sec" onclick="cerrarModal('modal-ajuste')">Cancelar</button>
-      <button class="btn btn-verde" onclick="confirmarAjuste()">Confirmar</button>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL PRODUCTO -->
-<div class="modal-overlay" id="modal-producto" onclick="if(event.target===this)cerrarModal('modal-producto')">
-  <div class="modal-box">
-    <div class="modal-title"><span id="modal-prod-titulo">Producto</span><button class="modal-close" onclick="cerrarModal('modal-producto')">×</button></div>
-    <div class="field" style="position:relative">
-      <label>Nombre comercial</label>
-      <input id="prod-nombre" placeholder="Ej: Roundup, Dithane..." oninput="onNombreChange()" autocomplete="off">
-      <div id="autocomplete" class="autocomplete-list"></div>
-    </div>
-    <div class="grid-2">
-      <div class="field"><label>Categoría</label><select id="prod-categoria"><option>Herbicida</option><option>Fungicida</option><option>Insecticida</option><option>Foliar</option><option>Coadyuvante</option><option>Otros</option></select></div>
-      <div class="field"><label>Fabricante</label><input id="prod-fabricante" placeholder="Ej: Syngenta"></div>
-    </div>
-    <div class="field"><label>Ingrediente activo</label><input id="prod-ingrediente" placeholder="Ej: Glifosato 48%"></div>
-    <div class="field"><label>Cultivos compatibles</label><input id="prod-cultivos" placeholder="Ej: Trigo, maíz, soya, vid"></div>
-    <div class="section-label">Stock e inventario</div>
-    <div class="grid-2">
-      <div class="field"><label>Proveedor local</label><input id="prod-proveedor" placeholder="Ej: Agrocenter"></div>
-      <div class="field"><label>Precio unit. $</label><input type="number" id="prod-precio" placeholder="0"></div>
-      <div class="field"><label>Stock actual</label><input type="number" id="prod-stock" placeholder="0"></div>
-      <div class="field"><label>Unidad</label><select id="prod-unidad"><option>L</option><option>kg</option><option>g</option><option>mL</option><option>t</option></select></div>
-      <div class="field"><label>Stock mínimo</label><input type="number" id="prod-minimo" placeholder="0"></div>
-    </div>
-    <div class="section-label">Documentos</div>
-    <div class="field"><label>🏷 Etiqueta (URL)</label><input id="prod-etiqueta-url" placeholder="https://..."></div>
-    <div class="field"><label>🛡 Hoja de seguridad (URL)</label><input id="prod-hoja-url" placeholder="https://..."></div>
-    <div class="modal-actions">
-      <button class="btn btn-sec" onclick="cerrarModal('modal-producto')">Cancelar</button>
-      <button class="btn btn-verde" onclick="guardarProducto()">Guardar</button>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL DOC -->
-<div class="modal-overlay" id="modal-doc" onclick="if(event.target===this)cerrarModal('modal-doc')">
-  <div class="modal-box" style="max-width:440px">
-    <div class="modal-title"><span id="doc-modal-titulo"></span><button class="modal-close" onclick="cerrarModal('modal-doc')">×</button></div>
-    <div class="field"><label>Link (URL de Google Drive, PDF, imagen...)</label><input id="doc-url-input" placeholder="https://..."></div>
-    <div class="modal-actions">
-      <button class="btn btn-sec" onclick="cerrarModal('modal-doc')">Cancelar</button>
-      <button class="btn btn-verde" onclick="guardarDoc()">Guardar</button>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL NUEVO PRODUCTO DESDE INGRESO -->
-<div class="modal-overlay" id="modal-nuevo-producto" onclick="if(event.target===this)cerrarModal('modal-nuevo-producto')">
-  <div class="modal-box">
-    <div class="modal-title">Ingresar producto nuevo<button class="modal-close" onclick="cerrarModal('modal-nuevo-producto')">×</button></div>
-    <div class="field"><label>Nombre comercial</label><input id="np-nombre"></div>
-    <div class="grid-2">
-      <div class="field"><label>Categoría</label><select id="np-categoria"><option>Herbicida</option><option>Fungicida</option><option>Insecticida</option><option>Foliar</option><option>Coadyuvante</option><option>Otros</option></select></div>
-      <div class="field"><label>Fabricante</label><input id="np-fabricante"></div>
-    </div>
-    <div class="field"><label>Ingrediente activo</label><input id="np-ingrediente"></div>
-    <div class="field"><label>Cultivos compatibles</label><input id="np-cultivos"></div>
-    <div class="section-label">Stock</div>
-    <div class="grid-2">
-      <div class="field"><label>Proveedor</label><input id="np-proveedor"></div>
-      <div class="field"><label>Precio unit. $</label><input type="number" id="np-precio"></div>
-      <div class="field"><label>Stock inicial</label><input type="number" id="np-stock"></div>
-      <div class="field"><label>Unidad</label><select id="np-unidad"><option>L</option><option>kg</option><option>g</option><option>mL</option><option>t</option></select></div>
-      <div class="field"><label>Stock mínimo</label><input type="number" id="np-minimo" value="0"></div>
-    </div>
-    <div class="section-label">Documentos</div>
-    <div class="field"><label>🏷 Etiqueta (URL)</label><input id="np-etiqueta" placeholder="https://..."></div>
-    <div class="field"><label>🛡 Hoja de seguridad (URL)</label><input id="np-hoja" placeholder="https://..."></div>
-    <div class="modal-actions">
-      <button class="btn btn-sec" onclick="cerrarModal('modal-nuevo-producto')">Cancelar</button>
-      <button class="btn btn-verde" onclick="guardarNuevoProducto()">Agregar al inventario</button>
-    </div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
 </body>
 </html>
