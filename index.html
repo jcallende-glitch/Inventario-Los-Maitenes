@@ -71,6 +71,20 @@ let ingresos = [];
 let unsubProductos = null;
 let unsubIngresos = null;
 let filtroCategoria = "Todos";
+let vistaAgrupada = false;
+
+window.toggleVista = function() {
+  vistaAgrupada = !vistaAgrupada;
+  const btn = document.getElementById("btn-vista");
+  btn.textContent = vistaAgrupada ? "{1F4CB} Vista normal" : "{1F52C} Agrupar por ingrediente activo";
+  btn.style.background = vistaAgrupada ? "#4f7942" : "#f3f4f6";
+  btn.style.color = vistaAgrupada ? "#fff" : "#374151";
+  const chips = document.getElementById("chips-cat-wrap");
+  if(chips) chips.style.display = vistaAgrupada ? "none" : "flex";
+  const thead = document.getElementById("tabla-thead");
+  if(thead) thead.style.display = vistaAgrupada ? "none" : "";
+  renderInventario();
+}
 let busqueda = "";
 let tabActiva = "inventario";
 
@@ -184,6 +198,70 @@ function renderInventario() {
   const tbody = document.getElementById("tabla-body");
   if (!data.length) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:#9ca3af">No se encontraron productos</td></tr>`;
+    return;
+  }
+
+  if (vistaAgrupada) {
+    // Agrupar por ingrediente activo
+    const grupos = {};
+    data.forEach(p => {
+      const key = p.ingredienteActivo || "Sin ingrediente activo definido";
+      if (!grupos[key]) grupos[key] = [];
+      grupos[key].push(p);
+    });
+    // Solo mostrar grupos con más de 1 producto, más todos los demás al final
+    const multiples = Object.entries(grupos).filter(([k,v]) => v.length > 1).sort((a,b) => a[0].localeCompare(b[0]));
+    const singles = Object.entries(grupos).filter(([k,v]) => v.length === 1).sort((a,b) => a[0].localeCompare(b[0]));
+    const todos = [...multiples, ...singles];
+
+    tbody.innerHTML = todos.map(([ingrediente, prods]) => {
+      const stockTotal = prods.reduce((s,p) => s + (p.stock||0), 0);
+      const unidad = prods[0].unidad || "L";
+      const esGrupo = prods.length > 1;
+      const encabezado = `<tr style="background:#f6faf6;border-top:2px solid #dce8dc">
+        <td colspan="8" style="padding:10px 14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div>
+              <span style="font-weight:700;font-size:14px;color:#1e3a1e">${ingrediente}</span>
+              ${esGrupo ? `<span style="margin-left:8px;background:#1e3a1e18;color:#1e3a1e;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${prods.length} productos</span>` : ""}
+            </div>
+            ${esGrupo ? `<div style="font-size:13px;color:#6b7280">Stock total: <strong style="color:#1e3a1e">${stockTotal} ${unidad}</strong></div>` : ""}
+          </div>
+        </td>
+      </tr>`;
+      const filas = prods.map(p => {
+        const ec = estadoConfig[getEstado(p)];
+        const cc = categoriaColor[p.categoria] || "#6b7280";
+        const hasEtiq = p.etiquetaUrl || p.etiquetaArchivo;
+        const hasHoja = p.hojaUrl || p.hojaArchivo;
+        return `<tr style="border-bottom:1px solid #f0f4f0;background:${getEstado(p)==='agotado'?'#fff8f8':'#fff'}">
+          <td style="padding:10px 14px 10px 28px">
+            <div style="font-weight:600;color:#111827">${p.nombre}</div>
+            ${p.fabricante ? `<div style="font-size:11px;color:#9ca3af">${p.fabricante}</div>` : ""}
+          </td>
+          <td style="padding:10px 14px"><span style="background:${cc}18;color:${cc};padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600">${p.categoria}</span></td>
+          <td style="padding:10px 14px;font-size:12px;color:#374151" colspan="2">${p.ingredienteActivo || "—"}</td>
+          <td style="padding:10px 14px">
+            <div style="font-weight:700;font-size:15px;color:${p.stock<=(p.stockMinimo||0)?"#dc2626":"#111827"}">${p.stock||0} <span style="font-size:12px;font-weight:400;color:#9ca3af">${p.unidad||"L"}</span></div>
+          </td>
+          <td style="padding:10px 14px">
+            <div style="display:flex;flex-direction:column;gap:4px">
+              ${hasEtiq ? `<a href="${p.etiquetaUrl||p.etiquetaArchivo}" target="_blank" style="background:#2b6cb018;color:#2b6cb0;border:1px solid #2b6cb033;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;text-decoration:none">🏷 Etiqueta</a>` : ""}
+              ${hasHoja ? `<a href="${p.hojaUrl||p.hojaArchivo}" target="_blank" style="background:#6b46c118;color:#6b46c1;border:1px solid #6b46c133;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;text-decoration:none">🛡 Hoja seg.</a>` : ""}
+            </div>
+          </td>
+          <td style="padding:10px 14px">
+            <span style="background:${ec.bg};color:${ec.color};padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap">
+              <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${ec.dot};margin-right:5px;vertical-align:middle"></span>${ec.label}
+            </span>
+          </td>
+          <td style="padding:10px 14px">
+            <button onclick="abrirAjuste('${p.id}')" title="Ajustar stock" style="background:#f0faf0;border:1px solid #c6dfc6;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:13px">⇅</button>
+          </td>
+        </tr>`;
+      }).join("");
+      return encabezado + filas;
+    }).join("");
     return;
   }
 
@@ -774,10 +852,11 @@ th{padding:11px 14px;text-align:left;font-weight:600;color:#374151;font-size:12p
 
       <div class="filtros-bar">
         <input id="input-busqueda" placeholder="Buscar por nombre o ingrediente activo..." oninput="onBusqueda()">
+        <button class="btn btn-sec" id="btn-vista" onclick="toggleVista()" style="white-space:nowrap">🔬 Agrupar por ingrediente activo</button>
         <button class="btn btn-prim" id="btn-nuevo" onclick="abrirNuevo()" style="display:none">+ Nuevo producto</button>
       </div>
 
-      <div class="chips-cat" style="margin-bottom:16px">
+      <div class="chips-cat" id="chips-cat-wrap" style="margin-bottom:16px;flex-wrap:wrap;display:flex">
         <button class="chip-cat active" onclick="setFiltro('Todos')">Todos</button>
         <button class="chip-cat" onclick="setFiltro('Herbicida')">Herbicida</button>
         <button class="chip-cat" onclick="setFiltro('Fungicida')">Fungicida</button>
@@ -789,7 +868,7 @@ th{padding:11px 14px;text-align:left;font-weight:600;color:#374151;font-size:12p
 
       <div class="table-wrap" style="overflow-x:auto">
         <table>
-          <thead>
+          <thead id="tabla-thead">
             <tr>
               <th>Producto</th><th>Categoría</th><th>Ingrediente activo</th><th>Fabricante</th>
               <th>Stock</th><th>Documentos</th><th>Estado</th><th></th>
