@@ -1,188 +1,165 @@
 // Netlify Function: sii-documentos.js
-// Obtiene facturas y guías de despacho recibidas desde el portal SII
-// Las credenciales se leen desde variables de entorno — nunca se exponen al navegador
-
 const https = require("https");
-const http = require("http");
 const { URLSearchParams } = require("url");
 
-const SII_RUT = process.env.SII_RUT;       // ej: 76123456-7
-const SII_CLAVE = process.env.SII_CLAVE;   // clave tributaria
+const SII_RUT = process.env.SII_RUT;
+const SII_CLAVE = process.env.SII_CLAVE;
 
-// Parsear RUT en partes (sin puntos, separado por guión)
 function parsearRut(rut) {
-  const [num, dv] = rut.split("-");
-  return { num: num.replace(/\./g, ""), dv };
+  const clean = rut.replace(/\./g, "").trim();
+  const [num, dv] = clean.split("-");
+  return { num, dv: dv.toLowerCase() };
 }
 
-// Función para hacer requests HTTP/HTTPS con soporte de cookies
-function request(url, options = {}, body = null) {
+function httpsRequest(url, options = {}, body = null) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
-    const lib = urlObj.protocol === "https:" ? https : http;
     const reqOptions = {
       hostname: urlObj.hostname,
-      port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
+      port: 443,
       path: urlObj.pathname + urlObj.search,
       method: options.method || "GET",
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "es-CL,es;q=0.9",
+        "Accept-Encoding": "identity",
+        "Connection": "keep-alive",
         ...options.headers,
       },
+      rejectUnauthorized: false,
     };
-
-    const req = lib.request(reqOptions, (res) => {
+    const req = https.request(reqOptions, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => {
-        resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: data,
-          location: res.headers.location,
-        });
-      });
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
     });
-
     req.on("error", reject);
     if (body) req.write(body);
     req.end();
   });
 }
 
-// Login al SII y obtención de token de sesión
+function extraerCookies(respHeaders, prevCookies = "") {
+  const setCookie = respHeaders["set-cookie"] || [];
+  const mapa = {};
+  if (prevCookies) {
+    prevCookies.split(";").forEach(c => {
+      const [k, v] = c.trim().split("=");
+      if (k) mapa[k.trim()] = v || "";
+    });
+  }
+  setCookie.forEach(c => {
+    const parte = c.split(";")[0].trim();
+    const eqIdx = parte.indexOf("=");
+    if (eqIdx > 0) {
+      const k = parte.substring(0, eqIdx).trim();
+      const v = parte.substring(eqIdx + 1).trim();
+      mapa[k] = v;
+    }
+  });
+  return Object.entries(mapa).map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
 async function loginSII() {
   const { num, dv } = parsearRut(SII_RUT);
 
-  // Paso 1: obtener página de login para extraer token CSRF
-  const loginPage = await request("https://misiir.sii.cl/cgi_misii/siihome.cgi");
-  
-  // Paso 2: hacer login con RUT y clave
+  // Paso 1: GET homer.sii.cl para obtener cookies iniciales
+  const resp1 = await httpsRequest("https://homer.sii.cl/");
+  let cookies = extraerCookies(resp1.headers);
+
+  // Paso 2: POST login
   const params = new URLSearchParams({
     rutcont: num,
     dvcontrib: dv,
     clave: SII_CLAVE,
-    referencia: "https://misiir.sii.cl/cgi_misii/siihome.cgi",
+    referencia: "https://homer.sii.cl/",
   });
 
-  const loginResp = await request(
+  const resp2 = await httpsRequest(
     "https://hercules.sii.cl/cgi_AUT2000/autInicio.cgi",
     {
       method: "POST",
       headers: {
+        Cookie: cookies,
         "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": "https://misiir.sii.cl/cgi_misii/siihome.cgi",
+        "Content-Length": Buffer.byteLength(params.toString()),
+        "Referer": "https://homer.sii.cl/",
+        "Origin": "https://homer.sii.cl",
       },
     },
     params.toString()
   );
 
-  // Extraer cookies de sesión
-  const setCookie = loginResp.headers["set-cookie"] || [];
-  const cookies = setCookie.map((c) => c.split(";")[0]).join("; ");
+  cookies = extraerCookies(resp2.headers, cookies);
+  console.log("Login status:", resp2.status);
+  console.log("Cookies obtenidas:", cookies.substring(0, 100));
 
-  if (!cookies || loginResp.status >= 400) {
-    throw new Error("Login fallido — verificar RUT y clave");
+  // Seguir redirección si la hay
+  if (resp2.status === 302 && resp2.headers.location) {
+    const resp3 = await httpsRequest(resp2.headers.location, {
+      headers: { Cookie: cookies, Referer: "https://hercules.sii.cl/" }
+    });
+    cookies = extraerCookies(resp3.headers, cookies);
+  }
+
+  // Verificar que no sea error de clave
+  if (resp2.body && (resp2.body.toLowerCase().includes("clave incorrecta") || resp2.body.toLowerCase().includes("rut incorrecto"))) {
+    throw new Error("RUT o clave incorrectos");
   }
 
   return cookies;
 }
 
-// Obtener documentos del Registro de Compras
-async function obtenerDocumentos(cookies, tipo = "33,52") {
-  // tipo 33 = Factura electrónica, 52 = Guía de despacho
-  const hoy = new Date();
-  const mesActual = String(hoy.getMonth() + 1).padStart(2, "0");
-  const anio = hoy.getFullYear();
-  const mesPrevio = hoy.getMonth() === 0 ? "12" : String(hoy.getMonth()).padStart(2, "0");
-  const anioPrevio = hoy.getMonth() === 0 ? anio - 1 : anio;
-
+async function obtenerDocumentos(cookies) {
   const { num, dv } = parsearRut(SII_RUT);
+  const hoy = new Date();
+  const documentos = [];
 
-  // Consultar registro de compras del mes actual y el anterior
-  const meses = [
-    { mes: mesActual, anio },
-    { mes: mesPrevio, anio: anioPrevio },
-  ];
+  for (let i = 0; i < 3; i++) {
+    const fecha = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    const periodo = `${fecha.getFullYear()}${String(fecha.getMonth() + 1).padStart(2, "0")}`;
 
-  let documentos = [];
-
-  for (const { mes, anio: a } of meses) {
     try {
-      const url = `https://www4.sii.cl/consdcvinternetui/services/data/facturacion/listadoDTE?rutEmpresa=${num}${dv}&periodo=${a}${mes}&tipo=COMPRAS`;
-      
-      const resp = await request(url, {
+      const url = `https://www4.sii.cl/consdcvinternetui/services/data/facturacion/listadoDTE?rutEmpresa=${num}${dv}&periodo=${periodo}&tipo=COMPRAS`;
+      const resp = await httpsRequest(url, {
         headers: {
           Cookie: cookies,
-          Accept: "application/json",
-          Referer: "https://www4.sii.cl/consdcvinternetui/index.html",
-        },
+          "Accept": "application/json, text/plain, */*",
+          "Referer": "https://www4.sii.cl/consdcvinternetui/index.html",
+        }
       });
 
-      if (resp.status === 200) {
+      console.log(`Periodo ${periodo} status:`, resp.status, "body:", resp.body.substring(0, 200));
+
+      if (resp.status === 200 && resp.body) {
         try {
           const data = JSON.parse(resp.body);
-          const docs = data.data || data.listado || data.documentos || [];
-          documentos = documentos.concat(docs.map(d => ({
-            ...d,
-            periodo: `${a}-${mes}`,
-          })));
-        } catch (e) {
-          console.log("No se pudo parsear respuesta:", resp.body.substring(0, 200));
-        }
+          const lista = data.data || data.listado || data.documentos || [];
+          if (Array.isArray(lista)) lista.forEach(d => documentos.push({ ...d, periodo }));
+        } catch(e) { console.log("Parse error:", e.message); }
       }
-    } catch (e) {
-      console.log(`Error consultando periodo ${a}-${mes}:`, e.message);
-    }
+    } catch(e) { console.log(`Error ${periodo}:`, e.message); }
   }
 
   return documentos;
 }
 
-// Handler principal
 exports.handler = async (event) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json",
   };
 
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 200, headers, body: "" };
-  }
-
   if (!SII_RUT || !SII_CLAVE) {
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: "Variables SII_RUT y SII_CLAVE no configuradas" }),
-    };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "Variables SII_RUT y SII_CLAVE no configuradas" }) };
   }
 
   try {
-    console.log("Iniciando login SII para RUT:", SII_RUT);
     const cookies = await loginSII();
-    console.log("Login exitoso, obteniendo documentos...");
     const documentos = await obtenerDocumentos(cookies);
-    console.log(`Documentos encontrados: ${documentos.length}`);
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        ok: true,
-        total: documentos.length,
-        documentos,
-      }),
-    };
-  } catch (e) {
-    console.error("Error:", e.message);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ ok: false, error: e.message }),
-    };
+    return { statusCode: 200, headers, body: JSON.stringify({ ok: true, total: documentos.length, documentos }) };
+  } catch(e) {
+    return { statusCode: 500, headers, body: JSON.stringify({ ok: false, error: e.message }) };
   }
 };
