@@ -10,186 +10,159 @@ function parsearRut(rut) {
   return { num: clean.substring(0, idx), dv: clean.substring(idx + 1).toLowerCase() };
 }
 
-function httpsGet(url, cookieJar = {}) {
+function req(url, opts = {}, body = null) {
   return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const cookieStr = Object.entries(cookieJar).map(([k,v]) => `${k}=${v}`).join("; ");
-    const options = {
-      hostname: urlObj.hostname,
+    const u = new URL(url);
+    const o = {
+      hostname: u.hostname,
       port: 443,
-      path: urlObj.pathname + urlObj.search,
-      method: "GET",
+      path: u.pathname + u.search,
+      method: opts.method || "GET",
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,*/*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+        "Accept": "*/*",
         "Accept-Language": "es-CL,es;q=0.9",
         "Accept-Encoding": "identity",
-        ...(cookieStr ? { Cookie: cookieStr } : {}),
+        "Connection": "keep-alive",
+        ...opts.headers,
       },
       rejectUnauthorized: false,
     };
-    const req = https.request(options, res => {
-      let body = "";
-      // Capturar cookies
-      (res.headers["set-cookie"] || []).forEach(c => {
-        const part = c.split(";")[0].trim();
-        const eqIdx = part.indexOf("=");
-        if (eqIdx > 0) cookieJar[part.substring(0, eqIdx).trim()] = part.substring(eqIdx + 1).trim();
-      });
-      res.on("data", chunk => body += chunk);
-      res.on("end", () => resolve({ status: res.statusCode, location: res.headers.location, body }));
+    const r = https.request(o, res => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => resolve({
+        status: res.statusCode,
+        headers: res.headers,
+        location: res.headers.location,
+        body: d,
+      }));
     });
-    req.on("error", reject);
-    req.end();
+    r.on("error", reject);
+    if (body) r.write(body);
+    r.end();
   });
 }
 
-function httpsPost(url, params, cookieJar = {}) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const body = params.toString();
-    const cookieStr = Object.entries(cookieJar).map(([k,v]) => `${k}=${v}`).join("; ");
-    const options = {
-      hostname: urlObj.hostname,
-      port: 443,
-      path: urlObj.pathname + urlObj.search,
-      method: "POST",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,*/*",
-        "Accept-Language": "es-CL,es;q=0.9",
-        "Accept-Encoding": "identity",
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Content-Length": Buffer.byteLength(body),
-        "Referer": "https://homer.sii.cl/",
-        "Origin": "https://homer.sii.cl",
-        ...(cookieStr ? { Cookie: cookieStr } : {}),
-      },
-      rejectUnauthorized: false,
-    };
-    const req = https.request(options, res => {
-      let respBody = "";
-      // Capturar cookies
-      (res.headers["set-cookie"] || []).forEach(c => {
-        const part = c.split(";")[0].trim();
-        const eqIdx = part.indexOf("=");
-        if (eqIdx > 0) cookieJar[part.substring(0, eqIdx).trim()] = part.substring(eqIdx + 1).trim();
-      });
-      res.on("data", chunk => respBody += chunk);
-      res.on("end", () => resolve({ status: res.statusCode, location: res.headers.location, body: respBody }));
-    });
-    req.on("error", reject);
-    req.write(body);
-    req.end();
+function parseCookies(headers, jar = {}) {
+  (headers["set-cookie"] || []).forEach(c => {
+    const p = c.split(";")[0].trim();
+    const i = p.indexOf("=");
+    if (i > 0) jar[p.substring(0, i).trim()] = p.substring(i + 1).trim();
   });
+  return jar;
+}
+
+function cookieStr(jar) {
+  return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
 async function loginSII() {
   const { num, dv } = parsearRut(SII_RUT);
   const jar = {};
 
-  // 1. GET homer para obtener cookies iniciales
-  const r1 = await httpsGet("https://homer.sii.cl/", jar);
-  console.log("homer.sii.cl status:", r1.status, "cookies:", Object.keys(jar).join(","));
+  // Paso 1: Obtener token CSRF desde la página de login
+  const r1 = await req("https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresarNormalAuto.html", {
+    headers: { Referer: "https://homer.sii.cl/" }
+  });
+  parseCookies(r1.headers, jar);
+  console.log("Step1 status:", r1.status, "cookies:", Object.keys(jar));
 
-  // 2. Si hay redirección, seguirla
-  if (r1.status === 302 && r1.location) {
-    const r1b = await httpsGet(r1.location, jar);
-    console.log("redirect status:", r1b.status);
-  }
+  // Extraer token oculto si existe
+  let token = "";
+  const tokenMatch = r1.body.match(/name="token"\s+value="([^"]+)"/);
+  if (tokenMatch) token = tokenMatch[1];
+  console.log("Token CSRF:", token ? "found" : "not found");
 
-  // 3. POST login
+  // Paso 2: POST con credenciales al endpoint de autenticación
   const params = new URLSearchParams({
     rutcont: num,
     dvcontrib: dv,
     clave: SII_CLAVE,
     referencia: "https://homer.sii.cl/",
+    ...(token ? { token } : {}),
   });
 
-  const r2 = await httpsPost("https://hercules.sii.cl/cgi_AUT2000/autInicio.cgi", params, jar);
-  console.log("login POST status:", r2.status, "location:", r2.location, "cookies:", Object.keys(jar).join(","));
+  const r2 = await req(
+    "https://zeusr.sii.cl/cgi_AUT2000/autInicio.cgi",
+    {
+      method: "POST",
+      headers: {
+        Cookie: cookieStr(jar),
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(params.toString()),
+        "Referer": "https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresarNormalAuto.html",
+        "Origin": "https://zeusr.sii.cl",
+      },
+    },
+    params.toString()
+  );
+  parseCookies(r2.headers, jar);
+  console.log("Step2 status:", r2.status, "location:", r2.location, "cookies:", Object.keys(jar));
 
-  // 4. Seguir redirecciones post-login (puede haber varias)
-  let location = r2.location;
-  let intentos = 0;
-  while (location && intentos < 5) {
-    const base = location.startsWith("http") ? location : `https://homer.sii.cl${location}`;
-    const redir = await httpsGet(base, jar);
-    console.log("redir", intentos, "->", base.substring(0, 60), "status:", redir.status, "cookies:", Object.keys(jar).join(","));
-    location = redir.location;
-    intentos++;
-    if (redir.status === 200) break;
+  // Paso 3: Seguir redirecciones
+  let loc = r2.location;
+  for (let i = 0; i < 6 && loc; i++) {
+    const base = loc.startsWith("http") ? loc : `https://homer.sii.cl${loc}`;
+    console.log(`Redir ${i}:`, base.substring(0, 80));
+    const rr = await req(base, {
+      headers: {
+        Cookie: cookieStr(jar),
+        Referer: i === 0 ? "https://zeusr.sii.cl/" : loc,
+      }
+    });
+    parseCookies(rr.headers, jar);
+    console.log(`Redir ${i} status:`, rr.status, "cookies:", Object.keys(jar));
+    if (rr.body && rr.body.includes("errorp")) {
+      throw new Error("Credenciales incorrectas — SII devolvió página de error");
+    }
+    loc = rr.location;
+    if (rr.status === 200 && !rr.location) break;
   }
 
-  console.log("Jar final:", Object.keys(jar).join(","));
+  console.log("Jar final keys:", Object.keys(jar));
 
-  // Verificar que tenemos cookies de sesión válidas
-  const tieneToken = Object.keys(jar).some(k =>
-    k.includes("TOKEN") || k.includes("SII") || k.includes("JSESSIONID") || k.includes("AUT")
-  );
-
-  if (!tieneToken && Object.keys(jar).length === 0) {
-    throw new Error("Login fallido — no se obtuvieron cookies de sesión");
+  // Necesitamos al menos alguna cookie de sesión
+  if (Object.keys(jar).length === 0) {
+    throw new Error("No se obtuvieron cookies de sesión");
   }
 
   return jar;
 }
 
-async function obtenerDocumentos(jar) {
+async function obtenerDTERecibidos(jar) {
   const { num, dv } = parsearRut(SII_RUT);
   const hoy = new Date();
-  const documentos = [];
+  const docs = [];
 
   for (let i = 0; i < 3; i++) {
-    const fecha = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
-    const periodo = `${fecha.getFullYear()}${String(fecha.getMonth() + 1).padStart(2, "0")}`;
-    const cookieStr = Object.entries(jar).map(([k,v]) => `${k}=${v}`).join("; ");
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    const periodo = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
 
     try {
-      // Intentar con el endpoint del DCV
+      // Endpoint interno del portal de consulta DTE
       const url = `https://www4.sii.cl/consdcvinternetui/services/data/facturacion/listadoDTE?rutEmpresa=${num}${dv}&periodo=${periodo}&tipo=COMPRAS`;
-
-      const resp = await new Promise((resolve, reject) => {
-        const urlObj = new URL(url);
-        const req = https.request({
-          hostname: urlObj.hostname,
-          port: 443,
-          path: urlObj.pathname + urlObj.search,
-          method: "GET",
-          headers: {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Encoding": "identity",
-            "Cookie": cookieStr,
-            "Referer": "https://www4.sii.cl/consdcvinternetui/index.html",
-          },
-          rejectUnauthorized: false,
-        }, res => {
-          let body = "";
-          res.on("data", c => body += c);
-          res.on("end", () => resolve({ status: res.statusCode, body }));
-        });
-        req.on("error", reject);
-        req.end();
-      });
-
-      console.log(`DCV ${periodo}: HTTP ${resp.status} — ${resp.body.substring(0, 150)}`);
-
-      if (resp.status === 200) {
-        try {
-          const data = JSON.parse(resp.body);
-          const lista = data.data || data.listado || data.documentos || [];
-          if (Array.isArray(lista)) lista.forEach(d => documentos.push({ ...d, periodo }));
-        } catch(e) {
-          console.log("JSON parse error:", e.message);
+      const r = await req(url, {
+        headers: {
+          Cookie: cookieStr(jar),
+          Accept: "application/json, */*",
+          Referer: "https://www4.sii.cl/consdcvinternetui/index.html",
+          "X-Requested-With": "XMLHttpRequest",
         }
+      });
+      console.log(`DTE ${periodo}: HTTP ${r.status} body:`, r.body.substring(0, 200));
+
+      if (r.status === 200) {
+        try {
+          const data = JSON.parse(r.body);
+          const lista = data.data || data.listado || data.documentos || data || [];
+          if (Array.isArray(lista)) lista.forEach(x => docs.push({ ...x, periodo }));
+        } catch(e) { console.log("parse err:", e.message); }
       }
-    } catch(e) {
-      console.log(`Error ${periodo}:`, e.message);
-    }
+    } catch(e) { console.log(`err ${periodo}:`, e.message); }
   }
 
-  return documentos;
+  return docs;
 }
 
 exports.handler = async (event) => {
@@ -201,9 +174,13 @@ exports.handler = async (event) => {
 
   try {
     const jar = await loginSII();
-    const documentos = await obtenerDocumentos(jar);
-    return { statusCode: 200, headers, body: JSON.stringify({ ok: true, total: documentos.length, documentos, cookies: Object.keys(jar) }) };
+    const docs = await obtenerDTERecibidos(jar);
+    return {
+      statusCode: 200, headers,
+      body: JSON.stringify({ ok: true, total: docs.length, documentos: docs, cookieKeys: Object.keys(jar) })
+    };
   } catch(e) {
+    console.error("Error:", e.message);
     return { statusCode: 500, headers, body: JSON.stringify({ ok: false, error: e.message }) };
   }
 };
