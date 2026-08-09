@@ -1,0 +1,9 @@
+{
+  "name": "inventario-los-maitenes",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "node-forge": "1.4.0",
+    "xml-crypto": "6.1.2"
+  }
+}
