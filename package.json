@@ -4,6 +4,7 @@
   "private": true,
   "dependencies": {
     "node-forge": "1.4.0",
-    "xml-crypto": "6.1.2"
+    "xml-crypto": "6.1.2",
+    "@netlify/aws-lambda-compat": "1.0.2"
   }
 }
