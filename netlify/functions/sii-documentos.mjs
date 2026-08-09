@@ -66,6 +66,7 @@ function cargarCertificado() {
   }
 
   const privateKeyPem = forge.pki.privateKeyToPem(privateKey);
+  const certPem = forge.pki.certificateToPem(cert); // formato que acepta Node para TLS mutuo
   const certDer = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
   const certB64 = forge.util.encode64(certDer);
 
@@ -80,7 +81,7 @@ function cargarCertificado() {
   const cn = cert.subject.attributes.find((a) => a.name === "commonName");
   console.log("Certificado cargado. Titular:", cn ? cn.value : "(desconocido)");
 
-  return { privateKeyPem, certB64, modulus, exponent };
+  return { privateKeyPem, certPem, certB64, modulus, exponent };
 }
 
 // ---------------------------------------------------------------------------
@@ -320,17 +321,16 @@ async function getDetalleCompra(token, rutEmisor, dvEmisor, periodo) {
 //     Digital" para entrar a sii.cl), y el SII responde con una cookie de
 //     sesión (TOKEN o SESSIONID) que se usa después para consultar el RCV.
 // ---------------------------------------------------------------------------
-function mutualTlsRequest(url, opts = {}, body = null) {
+function mutualTlsRequest(url, certData, opts = {}, body = null) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
-    const pfxBuffer = Buffer.from(CERT_B64, "base64");
     const o = {
       hostname: u.hostname,
       port: 443,
       path: u.pathname + u.search,
       method: opts.method || "GET",
-      pfx: pfxBuffer,
-      passphrase: CERT_PASS,
+      cert: certData.certPem,
+      key: certData.privateKeyPem,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
         ...opts.headers,
@@ -349,12 +349,13 @@ function mutualTlsRequest(url, opts = {}, body = null) {
   });
 }
 
-async function loginConCertificadoTLS() {
+async function loginConCertificadoTLS(certData) {
   const referencia = "https://palena.sii.cl/cgi_dte/UPL/DTEauth?1";
   const bodyForm = `referencia=${encodeURIComponent(referencia)}`;
 
   const r = await mutualTlsRequest(
     "https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi",
+    certData,
     {
       method: "POST",
       headers: {
@@ -388,7 +389,7 @@ async function loginConCertificadoTLS() {
 // rutPropio/dvPropio: el RUT DE TU PROPIA EMPRESA (no de un proveedor externo).
 // Con esto el SII devuelve el resumen agrupado por TODOS los proveedores del
 // período, tal como se ve en la pantalla de "Registro de Compras y Ventas".
-async function getResumenRCV(cookie, rutPropio, dvPropio, periodo, operacion) {
+async function getResumenRCV(certData, cookie, rutPropio, dvPropio, periodo, operacion) {
   const estados =
     operacion === "VENTA" ? ["REGISTRO"] : ["REGISTRO", "RECLAMADO", "PENDIENTE"];
 
@@ -411,6 +412,7 @@ async function getResumenRCV(cookie, rutPropio, dvPropio, periodo, operacion) {
 
     const r = await mutualTlsRequest(
       "https://www4.sii.cl/consdcvinternetui/services/data/facadeService/getResumen",
+      certData,
       {
         method: "POST",
         headers: {
@@ -477,11 +479,11 @@ export default withLambda(async (event, context) => {
     }
 
     // Modo 1 (por defecto): resumen de todos los proveedores del período, vía TLS mutuo
-    cargarCertificado(); // valida que el certificado esté bien formado antes de usarlo en TLS
-    const cookie = await loginConCertificadoTLS();
+    const certDataTls = cargarCertificado();
+    const cookie = await loginConCertificadoTLS(certDataTls);
     console.log("Login TLS exitoso. Cookie:", cookie.nombre);
 
-    const resumen = await getResumenRCV(cookie, rutPropio, dvPropio, periodo, operacion);
+    const resumen = await getResumenRCV(certDataTls, cookie, rutPropio, dvPropio, periodo, operacion);
 
     return {
       statusCode: 200,
