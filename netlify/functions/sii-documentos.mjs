@@ -5,7 +5,10 @@ import { SignedXml } from "xml-crypto";
 
 // El certificado viene dividido en 2 variables de entorno por el límite de 5000
 // caracteres de Netlify. Se reconstruye aquí uniendo ambas partes.
-const CERT_B64 = `${process.env.SII_CERT_B64_1 || ""}${process.env.SII_CERT_B64_2 || ""}`;
+// El .trim() elimina espacios/saltos de línea que a veces se cuelan al copiar y pegar.
+const PARTE_1 = (process.env.SII_CERT_B64_1 || "").trim();
+const PARTE_2 = (process.env.SII_CERT_B64_2 || "").trim();
+const CERT_B64 = `${PARTE_1}${PARTE_2}`;
 const CERT_PASS = process.env.SII_CERT_PASS;
 
 // ---------------------------------------------------------------------------
@@ -16,8 +19,34 @@ function cargarCertificado() {
     throw new Error("Faltan variables SII_CERT_B64_1 / SII_CERT_B64_2 / SII_CERT_PASS");
   }
 
-  const pfxDer = forge.util.decode64(CERT_B64);
-  const p12Asn1 = forge.asn1.fromDer(pfxDer);
+  console.log(
+    `Diagnóstico certificado -> parte1: ${PARTE_1.length} chars, parte2: ${PARTE_2.length} chars, total: ${CERT_B64.length} chars`
+  );
+  // Validar que el string sólo contenga caracteres base64 válidos
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(CERT_B64)) {
+    const invalido = CERT_B64.split("").find((c) => !/[A-Za-z0-9+/=]/.test(c));
+    throw new Error(
+      `El certificado reconstruido contiene caracteres inválidos para base64 (ej: ${JSON.stringify(
+        invalido
+      )}). Revisa que las variables SII_CERT_B64_1 y SII_CERT_B64_2 no tengan espacios ni saltos de línea extra.`
+    );
+  }
+
+  let pfxDer;
+  try {
+    pfxDer = forge.util.decode64(CERT_B64);
+  } catch (e) {
+    throw new Error(`Error decodificando base64 (largo total: ${CERT_B64.length}): ${e.message}`);
+  }
+
+  let p12Asn1;
+  try {
+    p12Asn1 = forge.asn1.fromDer(pfxDer);
+  } catch (e) {
+    throw new Error(
+      `Error leyendo estructura ASN.1 (bytes decodificados: ${pfxDer.length}). Esto casi siempre significa que el base64 reconstruido está incompleto o corrupto. Detalle: ${e.message}`
+    );
+  }
   const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, false, CERT_PASS);
 
   let cert, privateKey;
