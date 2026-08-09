@@ -135,8 +135,17 @@ async function obtenerSemilla() {
   const r = await soapRequest("https://palena.sii.cl/DTEWS/CrSeed.jws", soapBody);
   console.log("CrSeed status:", r.status);
 
-  const m = r.body.match(/<getSeedReturn[^>]*>([\s\S]*?)<\/getSeedReturn>/);
-  if (!m) throw new Error("Respuesta inesperada de CrSeed: " + r.body.substring(0, 300));
+  // Tolerante a prefijos de namespace: busca cualquier etiqueta que termine en
+  // "getSeedReturn" o "getSeedResponse", con o sin prefijo tipo "ns1:".
+  const m = r.body.match(
+    /<(?:[\w-]+:)?getSeedReturn[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?getSeedReturn>/
+  );
+  if (!m) {
+    throw new Error(
+      "Respuesta inesperada de CrSeed (no se encontró getSeedReturn). Respuesta completa: " +
+        r.body.substring(0, 2000)
+    );
+  }
 
   const decoded = decodeXmlEntities(m[1]);
   const estadoMatch = decoded.match(/<ESTADO>(-?\d+)<\/ESTADO>/);
@@ -202,8 +211,15 @@ async function obtenerToken(xmlFirmado) {
   const r = await soapRequest("https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws", soapBody);
   console.log("GetTokenFromSeed status:", r.status);
 
-  const m = r.body.match(/<getTokenReturn[^>]*>([\s\S]*?)<\/getTokenReturn>/);
-  if (!m) throw new Error("Respuesta inesperada de GetTokenFromSeed: " + r.body.substring(0, 300));
+  const m = r.body.match(
+    /<(?:[\w-]+:)?getTokenReturn[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?getTokenReturn>/
+  );
+  if (!m) {
+    throw new Error(
+      "Respuesta inesperada de GetTokenFromSeed (no se encontró getTokenReturn). Respuesta completa: " +
+        r.body.substring(0, 2000)
+    );
+  }
 
   const decoded = decodeXmlEntities(m[1]);
   const estadoMatch = decoded.match(/<ESTADO>(-?\d+)<\/ESTADO>/);
