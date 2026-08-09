@@ -237,9 +237,11 @@ async function obtenerToken(xmlFirmado) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. (Experimental) Usar el Token para consultar DTE recibidos en www4.sii.cl
-//    NOTA: esta parte no está tan documentada oficialmente como los pasos
-//    1-4. Si no devuelve datos, revisar los logs de la función en Netlify.
+// 5. Consultar el detalle de compras de UN proveedor específico en un período.
+//    Este es el endpoint real que usa la aplicación "Registro de Compras y Ventas"
+//    del SII (confirmado por múltiples desarrolladores externos). Requiere saber
+//    de antemano el RUT del proveedor — no existe una versión pública confirmada
+//    que liste automáticamente TODOS los proveedores de un período sin conocerlos.
 // ---------------------------------------------------------------------------
 function req(url, opts = {}, body = null) {
   return new Promise((resolve, reject) => {
@@ -251,7 +253,7 @@ function req(url, opts = {}, body = null) {
       method: opts.method || "GET",
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
-        Accept: "application/json, text/html,*/*;q=0.8",
+        Accept: "application/json, text/plain, */*",
         "Accept-Language": "es-CL,es;q=0.9",
         ...opts.headers,
       },
@@ -267,69 +269,230 @@ function req(url, opts = {}, body = null) {
   });
 }
 
-async function obtenerDTERecibidos(token, rutEmpresa) {
-  const hoy = new Date();
-  const docs = [];
+// rutEmisor/dvEmisor: RUT del PROVEEDOR (no de tu empresa) sin puntos, con dígito
+// verificador separado. periodo: "202506" (año+mes). token: el TOKEN ya obtenido.
+async function getDetalleCompra(token, rutEmisor, dvEmisor, periodo) {
+  const url = "https://www4.sii.cl/consdcvinternetui/services/data/facadeService/getDetalleCompra";
+  const body = JSON.stringify({
+    metaData: {
+      conversationId: token,
+      transactionId: "0",
+      namespace: "cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService/getDetalleCompra",
+      page: null,
+    },
+    data: {
+      rutEmisor: String(rutEmisor),
+      dvEmisor: String(dvEmisor),
+      ptributario: String(periodo),
+      operacion: "COMPRA",
+      estadoContab: "REGISTRO",
+      codTipoDoc: "0", // 0 = todos los tipos de documento
+    },
+  });
 
-  for (let i = 0; i < 3; i++) {
-    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
-    const periodo = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const url = `https://www4.sii.cl/consdcvinternetui/services/data/facturacion/listadoDTE?rutEmpresa=${rutEmpresa}&periodo=${periodo}&tipo=COMPRAS`;
+  const r = await req(
+    url,
+    {
+      method: "POST",
+      headers: {
+        Cookie: `TOKEN=${token}`,
+        "Content-Type": "application/json;charset=utf-8",
+      },
+    },
+    body
+  );
 
-    try {
-      const r = await req(url, {
-        headers: {
-          Cookie: `TOKEN=${token}`,
-          "X-Requested-With": "XMLHttpRequest",
-          Referer: "https://www4.sii.cl/consdcvinternetui/index.html",
-        },
-      });
-      console.log(`DTE ${periodo}: status ${r.status} — ${r.body.substring(0, 200)}`);
+  console.log(`getDetalleCompra (${rutEmisor}-${dvEmisor}, ${periodo}): status ${r.status} — ${r.body.substring(0, 300)}`);
 
-      if (r.status === 200) {
-        try {
-          const data = JSON.parse(r.body);
-          const lista = data.data || data.listado || data.documentos || data || [];
-          if (Array.isArray(lista)) lista.forEach((x) => docs.push({ ...x, periodo }));
-        } catch (e) {
-          console.log("No se pudo parsear JSON:", e.message);
-        }
-      }
-    } catch (e) {
-      console.log(`Error consultando ${periodo}:`, e.message);
-    }
+  if (r.status !== 200) {
+    throw new Error(`SII respondió ${r.status} al consultar el proveedor ${rutEmisor}-${dvEmisor}: ${r.body.substring(0, 300)}`);
+  }
+  return JSON.parse(r.body);
+}
+
+// ---------------------------------------------------------------------------
+// 5b. AUTENTICACIÓN POR TLS MUTUO (necesaria para las apps web del SII, como
+//     el Registro de Compras y Ventas en consdcvinternetui).
+//
+//     Esto es DISTINTO al flujo de semilla/token de más arriba (ese sirve para
+//     Web Services tipo SOAP). Aquí el certificado se presenta directo en la
+//     conexión HTTPS (como lo hace un navegador cuando eliges "Certificado
+//     Digital" para entrar a sii.cl), y el SII responde con una cookie de
+//     sesión (TOKEN o SESSIONID) que se usa después para consultar el RCV.
+// ---------------------------------------------------------------------------
+function mutualTlsRequest(url, opts = {}, body = null) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const pfxBuffer = Buffer.from(CERT_B64, "base64");
+    const o = {
+      hostname: u.hostname,
+      port: 443,
+      path: u.pathname + u.search,
+      method: opts.method || "GET",
+      pfx: pfxBuffer,
+      passphrase: CERT_PASS,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+        ...opts.headers,
+      },
+    };
+    const r = https.request(o, (res) => {
+      let d = "";
+      res.on("data", (c) => (d += c));
+      res.on("end", () =>
+        resolve({ status: res.statusCode, headers: res.headers, body: d })
+      );
+    });
+    r.on("error", reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
+
+async function loginConCertificadoTLS() {
+  const referencia = "https://palena.sii.cl/cgi_dte/UPL/DTEauth?1";
+  const bodyForm = `referencia=${encodeURIComponent(referencia)}`;
+
+  const r = await mutualTlsRequest(
+    "https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(bodyForm),
+      },
+    },
+    bodyForm
+  );
+
+  console.log(
+    `Login TLS mutuo -> status: ${r.status}, set-cookie: ${JSON.stringify(
+      r.headers["set-cookie"] || []
+    )}`
+  );
+
+  const cookies = r.headers["set-cookie"] || [];
+  for (const c of cookies) {
+    const m = c.match(/^(TOKEN|SESSIONID)=([^;]+)/);
+    if (m) return { nombre: m[1], valor: m[2] };
   }
 
-  return docs;
+  throw new Error(
+    `No se encontró cookie TOKEN/SESSIONID tras el login TLS. Status: ${r.status}. Respuesta (primeros 1000 caracteres): ${r.body.substring(
+      0,
+      1000
+    )}`
+  );
+}
+
+// rutPropio/dvPropio: el RUT DE TU PROPIA EMPRESA (no de un proveedor externo).
+// Con esto el SII devuelve el resumen agrupado por TODOS los proveedores del
+// período, tal como se ve en la pantalla de "Registro de Compras y Ventas".
+async function getResumenRCV(cookie, rutPropio, dvPropio, periodo, operacion) {
+  const estados =
+    operacion === "VENTA" ? ["REGISTRO"] : ["REGISTRO", "RECLAMADO", "PENDIENTE"];
+
+  const resultados = {};
+  for (const estado of estados) {
+    const payload = JSON.stringify({
+      metaData: {
+        namespace: "cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService/getResumen",
+        conversationId: `${cookie.nombre}=${cookie.valor}`,
+        transactionId: String(Date.now()),
+      },
+      data: {
+        RutEmisor: String(rutPropio),
+        DvEmisor: String(dvPropio),
+        EstadoContab: estado,
+        Ptributario: String(periodo),
+        Operacion: operacion.toUpperCase(),
+      },
+    });
+
+    const r = await mutualTlsRequest(
+      "https://www4.sii.cl/consdcvinternetui/services/data/facadeService/getResumen",
+      {
+        method: "POST",
+        headers: {
+          Cookie: `${cookie.nombre}=${cookie.valor}`,
+          "Content-Type": "application/json;charset=utf-8",
+          "Content-Length": Buffer.byteLength(payload),
+        },
+      },
+      payload
+    );
+
+    console.log(
+      `getResumen [${estado}] -> status: ${r.status}, body (primeros 400): ${r.body.substring(0, 400)}`
+    );
+
+    if (r.status === 200) {
+      try {
+        resultados[estado] = JSON.parse(r.body);
+      } catch (e) {
+        resultados[estado] = { error: "No se pudo parsear JSON", raw: r.body.substring(0, 500) };
+      }
+    } else {
+      resultados[estado] = { error: `Status ${r.status}`, raw: r.body.substring(0, 500) };
+    }
+  }
+  return resultados;
 }
 
 // ---------------------------------------------------------------------------
 // Handler principal
+//
+// Modo 1 (por defecto) — Resumen de TODOS los proveedores de un período:
+//   /.netlify/functions/sii-documentos?periodo=202506&operacion=COMPRA
+//   (usa el RUT de tu propia empresa, tomado de la variable SII_RUT)
+//
+// Modo 2 — Detalle de UN proveedor específico ya conocido:
+//   /.netlify/functions/sii-documentos?rutEmisor=76876772&dvEmisor=6&periodo=202506&detalle=1
 // ---------------------------------------------------------------------------
 export default withLambda(async (event, context) => {
   const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" };
+  const params = event.queryStringParameters || {};
 
   try {
-    const certData = cargarCertificado();
+    // Preparamos el RUT propio (de la empresa, desde SII_RUT) sin puntos ni guión
+    const rutSii = (process.env.SII_RUT || "").replace(/\./g, "");
+    const [rutPropio, dvPropio] = rutSii.split("-");
 
-    const semilla = await obtenerSemilla();
-    console.log("Semilla obtenida:", semilla);
+    const periodo =
+      params.periodo ||
+      (() => {
+        const d = new Date();
+        return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
+      })();
+    const operacion = (params.operacion || "COMPRA").toUpperCase();
 
-    const xmlFirmado = firmarSemilla(semilla, certData);
-    const token = await obtenerToken(xmlFirmado);
-    console.log("Token obtenido:", token);
+    // Modo 2: detalle de un proveedor puntual (usa el flujo semilla/token, ya probado)
+    if (params.rutEmisor && params.dvEmisor && params.detalle) {
+      const certData = cargarCertificado();
+      const semilla = await obtenerSemilla();
+      const xmlFirmado = firmarSemilla(semilla, certData);
+      const token = await obtenerToken(xmlFirmado);
+      const resultado = await getDetalleCompra(token, params.rutEmisor, params.dvEmisor, periodo);
+      return { statusCode: 200, headers, body: JSON.stringify({ ok: true, modo: "detalle", token, resultado }) };
+    }
 
-    const rutEmpresa = (process.env.SII_RUT || "").replace(/\./g, "").replace("-", "");
-    const docs = await obtenerDTERecibidos(token, rutEmpresa);
+    // Modo 1 (por defecto): resumen de todos los proveedores del período, vía TLS mutuo
+    cargarCertificado(); // valida que el certificado esté bien formado antes de usarlo en TLS
+    const cookie = await loginConCertificadoTLS();
+    console.log("Login TLS exitoso. Cookie:", cookie.nombre);
+
+    const resumen = await getResumenRCV(cookie, rutPropio, dvPropio, periodo, operacion);
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         ok: true,
-        token, // útil para depurar en los logs; quitar si se prefiere no exponerlo
-        total: docs.length,
-        documentos: docs,
+        modo: "resumen",
+        periodo,
+        operacion,
+        rutConsultado: `${rutPropio}-${dvPropio}`,
+        resumen,
       }),
     };
   } catch (e) {
